@@ -3,25 +3,26 @@ package main
 import (
 	"context"
 	"log"
-	"nocturn.example/aegis-operations/internal/platform"
 	"os"
 	"os/signal"
 	"syscall"
+
+	"nocturn.example/aegis-operations/internal/platform"
 )
 
 func main() {
-	c, err := platform.LoadConfig()
+	config, err := platform.LoadConfig()
 	if err != nil {
 		log.Fatal(err)
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	store, err := platform.Open(ctx, c.DatabaseURL)
+	store, err := platform.Open(ctx, config.DatabaseURL)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer store.DB.Close()
-	if err := (&platform.Worker{Store: store, Config: c}).Run(ctx); err != nil {
+	if err := (&platform.Worker{Store: store, Config: config}).RunArchive(ctx); err != nil {
 		log.Fatal(err)
 	}
 }

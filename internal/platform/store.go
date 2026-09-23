@@ -51,7 +51,7 @@ func (s *Store) OpenTenantReader(ctx context.Context, url string) error {
          ON owner_policies.tablename=owned.relname AND owner_policies.schemaname='public'
        WHERE owner_policies.policyname='tenant_reader_scope'
          AND owned.relnamespace='public'::regnamespace),
-      (SELECT count(*)=16 AND count(DISTINCT tables.oid)=16
+	      (SELECT count(*)=18 AND count(DISTINCT tables.oid)=18
          AND bool_and(policies.policyname='tenant_reader_scope')
        FROM pg_class tables
        JOIN pg_policies policies ON policies.tablename=tables.relname
@@ -63,7 +63,8 @@ func (s *Store) OpenTenantReader(ctx context.Context, url string) error {
          'public.policies'::regclass,'public.action_requests'::regclass,
          'public.jobs'::regclass,'public.audit_events'::regclass,
          'public.notification_outbox'::regclass,'public.knowledge_documents'::regclass,
-         'public.investigations'::regclass,'public.connector_batches'::regclass) AND tables.relrowsecurity)
+	         'public.investigations'::regclass,'public.connector_batches'::regclass,
+	         'public.connector_log_sources'::regclass,'public.log_batches'::regclass) AND tables.relrowsecurity)
       FROM pg_roles session_role, pg_roles active_role
       WHERE session_role.rolname=session_user AND active_role.rolname=current_user
       `).Scan(&member, &privileged, &owner, &policiesReady)

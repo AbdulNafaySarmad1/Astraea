@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Nocturn Operations API
-  version: 1.1.0
+  version: 1.2.0
   description: Tenant-scoped control-plane API. Bearer tokens are validated against Keycloak.
 servers:
   - url: /v1
@@ -160,6 +160,44 @@ components:
               observed_at: {type: string, format: date-time}
               latency_ms: {type: number, minimum: 0, maximum: 30000}
               metrics: {type: array, maxItems: 16, items: {$ref: '#/components/schemas/ConnectorMetric'}}
+    ApprovedLogSource:
+      type: object
+      required: [name,kind,path_sha256]
+      properties:
+        name: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}
+        kind: {type: string, enum: [postgres,valkey,vault,aegiscore]}
+        path_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+    ConnectorLogBatch:
+      type: object
+      required: [tenant_id,connector_id,batch_id,source_name,source_kind,path_sha256,collected_at,lines]
+      properties:
+        tenant_id: {type: string, format: uuid, description: Must match the authenticated connector's tenant}
+        connector_id: {type: string, format: uuid, description: Must match the authenticated connector}
+        batch_id: {type: string, pattern: '^[0-9a-f]{32}$'}
+        source_name: {type: string, pattern: '^[a-z][a-z0-9_-]{0,63}$'}
+        source_kind: {type: string, enum: [postgres,valkey,vault,aegiscore]}
+        path_sha256: {type: string, pattern: '^[0-9a-f]{64}$'}
+        collected_at: {type: string, format: date-time}
+        lines: {type: array, minItems: 1, maxItems: 1024, items: {type: string, maxLength: 8192}}
+    LogBatchMetadata:
+      type: object
+      required: [connector_id,batch_id,source_name,source_kind,collected_at,received_at,line_count,status,archive_attempts,archive_retry_at,cleanup_attempts,cleanup_retry_at,legal_hold]
+      properties:
+        connector_id: {type: string, format: uuid}
+        batch_id: {type: string}
+        source_name: {type: string}
+        source_kind: {type: string}
+        collected_at: {type: string, format: date-time}
+        received_at: {type: string, format: date-time}
+        line_count: {type: integer}
+        status: {type: string, enum: [hot,archived,blocked]}
+        archive_attempts: {type: integer}
+        archive_retry_at: {type: string, format: date-time}
+        cleanup_attempts: {type: integer}
+        cleanup_retry_at: {type: string, format: date-time}
+        archived_at: {type: [string,'null'], format: date-time}
+        hot_deleted_at: {type: [string,'null'], format: date-time}
+        legal_hold: {type: boolean}
     Investigation:
       type: object
       required: [id,requested_by,status,summary,uncertainty,evidence,sources,provider,created_at]
@@ -214,6 +252,79 @@ paths:
         '200': {description: Batch accepted or already recorded}
         '400': {description: Invalid or unauthorized telemetry}
         '401': {description: Connector credential revoked or unknown}
+  /connectors/logs:
+    post:
+      operationId: ingestConnectorLogs
+      security: [{connectorAuth: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ConnectorLogBatch'}}}}
+      responses:
+        '200': {description: Encrypted batch persisted and audited, or an identical batch already exists}
+        '400': {description: Invalid or oversized batch}
+        '401': {description: Connector credential revoked or unknown}
+        '403': {description: Connector or source not approved}
+  /tenants/{tenant}/enrollment-tokens:
+    post:
+      operationId: issueEnrollmentToken
+      parameters: [{name: tenant, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                capabilities: {type: array, items: {type: string, enum: [tcp_health,host_metrics,postgres_health,valkey_health,service_logs]}}
+                log_sources: {type: array, maxItems: 16, items: {$ref: '#/components/schemas/ApprovedLogSource'}}
+      responses:
+        '201': {description: One-time token with server-approved capabilities and log sources}
+        '400': {description: Invalid enrollment scope}
+  /connectors/enroll:
+    post:
+      operationId: enrollConnector
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token,name,version]
+              properties:
+                token: {type: string}
+                name: {type: string}
+                version: {type: string}
+                capabilities: {type: array, items: {type: string}, description: If supplied, must exactly match the token's approved set}
+      responses:
+        '201': {description: Tenant-bound connector identity created}
+        '403': {description: Token invalid or requested scope differs from approval}
+  /tenants/{tenant}/log-batches:
+    get:
+      operationId: listLogBatches
+      parameters:
+        - {name: tenant, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
+        - {name: before, in: query, schema: {type: string, format: date-time}}
+      responses:
+        '200': {description: Tenant-scoped log metadata only, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/LogBatchMetadata'}}}}}}}
+  /tenants/{tenant}/log-batches/{connector}/{batch}/legal-hold:
+    post:
+      operationId: setLogLegalHold
+      parameters:
+        - {name: tenant, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: connector, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: batch, in: path, required: true, schema: {type: string, pattern: '^[0-9a-f]{32}$'}}
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [engaged], properties: {engaged: {type: boolean}}}}}}
+      responses:
+        '200': {description: Legal hold changed and audited}
+  /tenants/{tenant}/log-batches/{connector}/{batch}/retry-archive:
+    post:
+      operationId: retryLogArchive
+      parameters:
+        - {name: tenant, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: connector, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: batch, in: path, required: true, schema: {type: string, pattern: '^[0-9a-f]{32}$'}}
+      responses:
+        '200': {description: Blocked archive batch returned to the retry queue and audited}
   /tenants/{tenant}/domains:
     get:
       operationId: listDomains

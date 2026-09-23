@@ -11,7 +11,8 @@ END $$;
 GRANT USAGE ON SCHEMA public TO nocturn_tenant_reader;
 REVOKE ALL PRIVILEGES ON tenants,memberships,domains,connectors,enrollment_tokens,
   components,telemetry,incidents,policies,action_requests,jobs,audit_events,
-  notification_outbox,knowledge_documents,investigations,connector_batches FROM nocturn_tenant_reader;
+  notification_outbox,knowledge_documents,investigations,connector_batches,
+  connector_log_sources,log_batches FROM nocturn_tenant_reader;
 GRANT SELECT(id,name,slug,status,isolation_mode,monitoring_approved,
   operations_approved,kill_switch,notification_recipients,created_at)
   ON tenants TO nocturn_tenant_reader;
@@ -37,6 +38,10 @@ GRANT SELECT(id,tenant_id,audit_event_id,recipient,status,attempts,delivered_at)
 GRANT SELECT(id,tenant_id,requested_by,status,summary,uncertainty,evidence,
   sources,provider,created_at,completed_at)
   ON investigations TO nocturn_tenant_reader;
+GRANT SELECT(tenant_id,connector_id,batch_id,source_name,source_kind,collected_at,
+  received_at,line_count,status,archive_attempts,archive_retry_at,cleanup_attempts,cleanup_retry_at,
+  archived_at,hot_deleted_at,legal_hold)
+  ON log_batches TO nocturn_tenant_reader;
 
 -- No tenant context means zero customer rows. Malformed UUIDs fail the query.
 -- Only reviewed shared knowledge is visible outside a tenant record.
@@ -47,7 +52,7 @@ BEGIN
     'tenants','memberships','domains','connectors','enrollment_tokens',
     'components','telemetry','incidents','policies','action_requests','jobs',
     'audit_events','notification_outbox','knowledge_documents','investigations',
-    'connector_batches'
+    'connector_batches','connector_log_sources','log_batches'
   ] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY',table_name);
     EXECUTE format('DROP POLICY IF EXISTS tenant_reader_scope ON %I',table_name);

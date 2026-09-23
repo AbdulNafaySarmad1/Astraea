@@ -16,7 +16,7 @@ The supplied Nocturn mark is also packaged in `deploy/keycloak/themes/nocturn/lo
 
 ## Secrets
 
-Use self-hosted Infisical machine identities with narrowly scoped projects and environments. Inject `DATABASE_URL`, `INFLUX_TOKEN`, `EMAIL_PROVIDER_TOKEN`, `TURNSTILE_SECRET`, and connector credentials into service processes at startup through an Infisical agent or workload identity integration. Use distinct identities for API, worker, notification adapter, and each customer connector. Do not share one token across tenants. Rotate at the secret manager and restart or re-enroll workloads as appropriate. No production secret belongs in `.env`, source, browser storage, model prompts, or email.
+Use self-hosted Infisical machine identities with narrowly scoped projects and environments. Inject `DATABASE_URL`, `INFLUX_TOKEN`, `EMAIL_PROVIDER_TOKEN`, `TURNSTILE_SECRET`, `LOG_KEY_B64`, and connector credentials into service processes at startup through an Infisical agent or workload identity integration. Use distinct identities for API, worker, notification adapter, and each customer connector. Do not share one token across tenants. Rotate at the secret manager and restart or re-enroll workloads as appropriate. No production secret belongs in `.env`, source, browser storage, model prompts, or email. Log key rotation is not yet implemented; preserve the active key for all retained batches.
 
 ## Database and queue
 
@@ -30,6 +30,10 @@ The API still uses its primary connection for writes, authorization lookups, con
 
 The control plane saves numeric probe latency in PostgreSQL and enqueues an InfluxDB write. Configure `INFLUX_URL`, `INFLUX_DATABASE`, and `INFLUX_TOKEN` to enable InfluxDB 3 writes. Treat a missing InfluxDB as degraded metrics delivery; never widen access or authorize operations because metrics are unavailable. The current console reads tenant-scoped PostgreSQL samples; a production retention/rollup path should move long-range graph queries to InfluxDB.
 
+## Service log storage
+
+Service log ingestion is disabled unless the API has an absolute `LOG_HOT_DIR`, a matching `LOG_HOT_MARKER`, and a base64 32-byte `LOG_KEY_B64`. Deploy `cmd/log-archive` separately with the same hot filesystem and key plus an absolute `LOG_ARCHIVE_DIR` and `LOG_ARCHIVE_MARKER` on the selected off-host storage. Provision `.aegisops-store-id` files directly on both mounted volumes. Give the API access only to hot storage; reserve the archive mount for this dedicated worker. The ordinary job worker needs neither the archive mount nor log key. Monitor capacity, archive lag, mount health, and restore tests. The application verifies archive readback and store identity but cannot attest that a configured mount is off-host. See [service log lifecycle](service-logs.md).
+
 ## Email
 
 `EMAIL_MODE=disabled` leaves outbox rows queued. `mock` marks them simulated. `http` posts minimal JSON to `EMAIL_PROVIDER_URL` over HTTPS with a bearer token and `Idempotency-Key`. The delivery gateway is responsible for provider-specific payload translation and should return a 2xx only when accepted. Dead records need an alert and operator review. Set `PUBLIC_URL` to the authenticated console URL used in audit links. No real email is sent in the demo.
@@ -40,7 +44,7 @@ Cloudflare or Akamai can be placed in front of the console and API. Configure TL
 
 ## Connector enrollment
 
-Create a customer with authorization reference and recipients. Publish the DNS challenge, verify it, issue a 15-minute enrollment token, and submit it to `/v1/connectors/enroll` with connector name, version, and approved capabilities. Store the returned credential in that customer's Infisical scope; it appears only once. Use a local connector config with approved probe hosts, ports, and CIDRs. The connector requires HTTPS and resolves each host, then connects only to an IP inside a configured CIDR. Give it a persistent private spool directory and customer-specific read-only PostgreSQL/Valkey monitoring credentials where those probes are enabled. Review local config with the customer. [Connector telemetry setup](connector-telemetry.md) lists the supported signals and limits. Approve monitoring only after the domain and connector are ready. The demo fixture is pre-approved solely for UI and API validation.
+Create a customer with authorization reference and recipients. Publish the DNS challenge, verify it, issue a 15-minute enrollment token with server-approved capabilities and named log sources where needed, and submit it to `/v1/connectors/enroll` with connector name and version. Any capabilities claimed during enrollment must exactly match the token's approval. Store the returned credential in that customer's Infisical scope; it appears only once. Use a local connector config with approved probe hosts, ports, and CIDRs. The connector requires HTTPS and resolves each host, then connects only to an IP inside a configured CIDR. Give it a persistent private spool directory and customer-specific read-only PostgreSQL/Valkey monitoring credentials where those probes are enabled. Review local config with the customer. [Connector telemetry setup](connector-telemetry.md) lists the supported signals and limits; [service log setup](service-logs.md) covers separate log approval, storage, and retention. Approve monitoring only after the domain and connector are ready. The demo fixture is pre-approved solely for UI and API validation.
 
 ## Release controls
 

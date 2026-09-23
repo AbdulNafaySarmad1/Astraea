@@ -36,14 +36,15 @@ type Probe struct {
 }
 
 type Config struct {
-	ControlPlaneURL           string  `json:"control_plane_url"`
-	TenantID                  string  `json:"tenant_id"`
-	ConnectorID               string  `json:"connector_id"`
-	Version                   string  `json:"version"`
-	Probes                    []Probe `json:"probes"`
-	HostMetrics               bool    `json:"host_metrics,omitempty"`
-	SpoolDir                  string  `json:"spool_dir,omitempty"`
-	CollectionIntervalSeconds int     `json:"collection_interval_seconds,omitempty"`
+	ControlPlaneURL           string      `json:"control_plane_url"`
+	TenantID                  string      `json:"tenant_id"`
+	ConnectorID               string      `json:"connector_id"`
+	Version                   string      `json:"version"`
+	Probes                    []Probe     `json:"probes"`
+	LogSources                []LogSource `json:"log_sources,omitempty"`
+	HostMetrics               bool        `json:"host_metrics,omitempty"`
+	SpoolDir                  string      `json:"spool_dir,omitempty"`
+	CollectionIntervalSeconds int         `json:"collection_interval_seconds,omitempty"`
 }
 
 type MetricSample struct {
@@ -91,6 +92,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	logSpool, err := openLogSpool(c.SpoolDir)
+	if err != nil {
+		log.Fatal(err)
+	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	client := newControlPlaneClient()
@@ -102,14 +107,19 @@ func main() {
 
 	collectAndQueue(ctx, c, spool)
 	flushQueue(ctx, client, c, credential, spool)
+	collectLogs(c, logSpool)
+	flushLogs(ctx, client, c, credential, logSpool)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-collectionTicker.C:
 			flushQueue(ctx, client, c, credential, spool)
+			flushLogs(ctx, client, c, credential, logSpool)
 			collectAndQueue(ctx, c, spool)
+			collectLogs(c, logSpool)
 			flushQueue(ctx, client, c, credential, spool)
+			flushLogs(ctx, client, c, credential, logSpool)
 		case <-heartbeatTicker.C:
 			flushQueue(ctx, client, c, credential, spool)
 			if err := send(ctx, client, c.ControlPlaneURL, credential, Heartbeat{TenantID: c.TenantID, ConnectorID: c.ConnectorID, Version: c.Version, Components: []ComponentSample{}}); err != nil {
@@ -141,7 +151,7 @@ func (c *Config) validate() error {
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return errors.New("control plane URL must be an HTTPS origin")
 	}
-	if c.TenantID == "" || c.ConnectorID == "" || c.Version == "" || len(c.Probes) > 100 {
+	if c.TenantID == "" || c.ConnectorID == "" || c.Version == "" || len(c.Probes) > 100 || len(c.LogSources) > 16 {
 		return errors.New("connector identity, version, or probe list invalid")
 	}
 	if c.CollectionIntervalSeconds == 0 {
@@ -157,6 +167,13 @@ func (c *Config) validate() error {
 		if err := validateProbe(p); err != nil {
 			return fmt.Errorf("probe %q: %w", p.Name, err)
 		}
+	}
+	seenSources := map[string]bool{}
+	for _, source := range c.LogSources {
+		if err := validateLogSource(source); err != nil || seenSources[source.Name] {
+			return errors.New("invalid or duplicate local log source")
+		}
+		seenSources[source.Name] = true
 	}
 	return nil
 }

@@ -100,6 +100,102 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/connectors/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["ingestConnectorLogs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/enrollment-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["issueEnrollmentToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/connectors/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["enrollConnector"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/log-batches": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["listLogBatches"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/log-batches/{connector}/{batch}/legal-hold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["setLogLegalHold"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tenants/{tenant}/log-batches/{connector}/{batch}/retry-archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["retryLogArchive"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant}/domains": {
         parameters: {
             query?: never;
@@ -379,6 +475,57 @@ export interface components {
                 metrics?: components["schemas"]["ConnectorMetric"][];
             }[];
         };
+        ApprovedLogSource: {
+            name: string;
+            /** @enum {string} */
+            kind: "postgres" | "valkey" | "vault" | "aegiscore";
+            path_sha256: string;
+        };
+        ConnectorLogBatch: {
+            /**
+             * Format: uuid
+             * @description Must match the authenticated connector's tenant
+             */
+            tenant_id: string;
+            /**
+             * Format: uuid
+             * @description Must match the authenticated connector
+             */
+            connector_id: string;
+            batch_id: string;
+            source_name: string;
+            /** @enum {string} */
+            source_kind: "postgres" | "valkey" | "vault" | "aegiscore";
+            path_sha256: string;
+            /** Format: date-time */
+            collected_at: string;
+            lines: string[];
+        };
+        LogBatchMetadata: {
+            /** Format: uuid */
+            connector_id: string;
+            batch_id: string;
+            source_name: string;
+            source_kind: string;
+            /** Format: date-time */
+            collected_at: string;
+            /** Format: date-time */
+            received_at: string;
+            line_count: number;
+            /** @enum {string} */
+            status: "hot" | "archived" | "blocked";
+            archive_attempts: number;
+            /** Format: date-time */
+            archive_retry_at: string;
+            cleanup_attempts: number;
+            /** Format: date-time */
+            cleanup_retry_at: string;
+            /** Format: date-time */
+            archived_at?: string | null;
+            /** Format: date-time */
+            hot_deleted_at?: string | null;
+            legal_hold: boolean;
+        };
         Investigation: {
             /** Format: uuid */
             id: string;
@@ -582,6 +729,195 @@ export interface operations {
             };
             /** @description Connector credential revoked or unknown */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    ingestConnectorLogs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectorLogBatch"];
+            };
+        };
+        responses: {
+            /** @description Encrypted batch persisted and audited */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid or oversized batch */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Connector credential revoked or unknown */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Connector or source not approved */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    issueEnrollmentToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    capabilities?: ("tcp_health" | "host_metrics" | "postgres_health" | "valkey_health" | "service_logs")[];
+                    log_sources?: components["schemas"]["ApprovedLogSource"][];
+                };
+            };
+        };
+        responses: {
+            /** @description One-time token with server-approved capabilities and log sources */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid enrollment scope */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    enrollConnector: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    token: string;
+                    name: string;
+                    version: string;
+                    /** @description If supplied */
+                    capabilities?: string[];
+                };
+            };
+        };
+        responses: {
+            /** @description Tenant-bound connector identity created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Token invalid or requested scope differs from approval */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listLogBatches: {
+        parameters: {
+            query?: {
+                limit?: number;
+                before?: string;
+            };
+            header?: never;
+            path: {
+                tenant: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tenant-scoped log metadata only */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["LogBatchMetadata"][];
+                    };
+                };
+            };
+        };
+    };
+    setLogLegalHold: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant: string;
+                connector: string;
+                batch: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    engaged: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Legal hold changed and audited */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    retryLogArchive: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tenant: string;
+                connector: string;
+                batch: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Blocked archive batch returned to the retry queue and audited */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

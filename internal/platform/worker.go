@@ -19,7 +19,7 @@ type Worker struct {
 	Config Config
 }
 
-func (w *Worker) Run(ctx context.Context) {
+func (w *Worker) Run(ctx context.Context) error {
 	ticker := time.NewTicker(2 * time.Second)
 	freshnessTicker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
@@ -27,7 +27,7 @@ func (w *Worker) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			return
+			return nil
 		case <-ticker.C:
 			w.processJob(ctx)
 			w.processNotification(ctx)

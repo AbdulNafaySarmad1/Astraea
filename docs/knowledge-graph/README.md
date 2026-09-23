@@ -1,6 +1,6 @@
 # Graphify repository graph
 
-The Graphify CLI generated this code knowledge graph after the telemetry hardening slice. It contains 385 nodes, 1,015 edges, and 23 communities.
+The Graphify CLI generated this code knowledge graph after the service-log and archive implementation. It contains 469 nodes, 1,322 edges, and 16 communities.
 
 - [Interactive graph](graphify-out/graph.html)
 - [Graph JSON](graphify-out/graph.json)

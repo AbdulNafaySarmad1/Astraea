@@ -5,7 +5,7 @@ RUN go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 ARG SERVICE=control-plane
-RUN case "$SERVICE" in control-plane|worker|connector|migrate|audit-verify) ;; *) exit 1 ;; esac && \
+RUN case "$SERVICE" in control-plane|worker|connector|log-archive|migrate|audit-verify) ;; *) exit 1 ;; esac && \
     CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/app ./cmd/$SERVICE
 
 FROM alpine:3.24

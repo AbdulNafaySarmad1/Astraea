@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -38,13 +39,24 @@ func decode(r *http.Request, out any) error {
 	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		return errors.New("Content-Type must be application/json")
 	}
-	d := json.NewDecoder(io.LimitReader(r.Body, 1<<20))
+	raw, err := io.ReadAll(io.LimitReader(r.Body, 1<<20+1))
+	if err != nil || len(raw) > 1<<20 {
+		return errors.New("JSON request exceeds one MiB")
+	}
+	d := json.NewDecoder(strings.NewReader(string(raw)))
 	d.DisallowUnknownFields()
-	return d.Decode(out)
+	if err = d.Decode(out); err != nil {
+		return err
+	}
+	var extra any
+	if err = d.Decode(&extra); !errors.Is(err, io.EOF) {
+		return errors.New("JSON request must contain one object")
+	}
+	return nil
 }
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/health/live" || r.URL.Path == "/health/ready" || r.URL.Path == "/v1/connectors/enroll" || strings.HasPrefix(r.URL.Path, "/v1/connectors/heartbeat") || r.URL.Path == "/v1/public/contact" {
+		if r.URL.Path == "/health/live" || r.URL.Path == "/health/ready" || r.URL.Path == "/v1/connectors/enroll" || r.URL.Path == "/v1/connectors/heartbeat" || r.URL.Path == "/v1/connectors/logs" || r.URL.Path == "/v1/public/contact" {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -88,6 +100,12 @@ func (s *Server) Routes() http.Handler {
 			fail(w, 503, "tenant reader unavailable")
 			return
 		}
+		if s.Config.LogHotDir != "" {
+			if _, err := openHotLogStorage(s.Config); err != nil {
+				fail(w, 503, "service log hot store unavailable")
+				return
+			}
+		}
 		writeJSON(w, 200, map[string]string{"status": "ready"})
 	})
 	mux.HandleFunc("GET /v1/me", s.me)
@@ -98,6 +116,9 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("GET /v1/tenants/{tenant}/metrics", s.metrics)
 	mux.HandleFunc("GET /v1/tenants/{tenant}/audit", s.auditList)
 	mux.HandleFunc("GET /v1/tenants/{tenant}/notifications", s.notifications)
+	mux.HandleFunc("GET /v1/tenants/{tenant}/log-batches", s.listLogBatches)
+	mux.HandleFunc("POST /v1/tenants/{tenant}/log-batches/{connector}/{batch}/legal-hold", s.setLogLegalHold)
+	mux.HandleFunc("POST /v1/tenants/{tenant}/log-batches/{connector}/{batch}/retry-archive", s.retryLogArchive)
 	mux.HandleFunc("POST /v1/tenants/{tenant}/domains", s.createDomain)
 	mux.HandleFunc("GET /v1/tenants/{tenant}/domains", s.domains)
 	mux.HandleFunc("POST /v1/tenants/{tenant}/domains/{domain}/verify", s.verifyDomain)
@@ -111,6 +132,7 @@ func (s *Server) Routes() http.Handler {
 	mux.HandleFunc("PUT /v1/tenants/{tenant}/policies/{actionType}", s.upsertPolicy)
 	mux.HandleFunc("POST /v1/connectors/enroll", s.enroll)
 	mux.HandleFunc("POST /v1/connectors/heartbeat", s.heartbeat)
+	mux.HandleFunc("POST /v1/connectors/logs", s.ingestLogs)
 	mux.HandleFunc("POST /v1/tenants/{tenant}/actions", s.proposeAction)
 	mux.HandleFunc("GET /v1/tenants/{tenant}/investigations", s.investigations)
 	mux.HandleFunc("POST /v1/tenants/{tenant}/investigations", s.startInvestigation)
@@ -483,18 +505,34 @@ func (s *Server) enrollmentToken(w http.ResponseWriter, r *http.Request) {
 		fail(w, 409, "customer authorization required")
 		return
 	}
+	var request struct {
+		Capabilities []string            `json:"capabilities"`
+		LogSources   []logSourceApproval `json:"log_sources"`
+	}
+	if r.ContentLength != 0 && decode(r, &request) != nil {
+		fail(w, 400, "invalid enrollment scope")
+		return
+	}
+	if request.Capabilities == nil {
+		request.Capabilities = []string{"tcp_health"}
+	}
+	if !validEnrollmentScope(request.Capabilities, request.LogSources) {
+		fail(w, 400, "invalid enrollment capability or log source")
+		return
+	}
+	logSources, _ := json.Marshal(request.LogSources)
 	token, err := randomToken()
 	if err != nil {
 		fail(w, 500, "token unavailable")
 		return
 	}
-	_, err = s.Store.DB.Exec(r.Context(), "INSERT INTO enrollment_tokens(tenant_id,token_hash,expires_at,created_by) VALUES($1,$2,now()+interval '15 minutes',$3)", id, digest(token), actorFrom(r.Context()).Subject)
+	_, err = s.Store.DB.Exec(r.Context(), "INSERT INTO enrollment_tokens(tenant_id,token_hash,expires_at,created_by,approved_capabilities,approved_log_sources) VALUES($1,$2,now()+interval '15 minutes',$3,$4,$5)", id, digest(token), actorFrom(r.Context()).Subject, request.Capabilities, logSources)
 	if err != nil {
 		fail(w, 503, "token unavailable")
 		return
 	}
-	s.log(r, &id, "connector.enrollment.issued", id, "success", nil, true)
-	writeJSON(w, 201, map[string]string{"token": token, "expires_in": "15m"})
+	s.log(r, &id, "connector.enrollment.issued", id, "success", map[string]any{"capabilities": request.Capabilities, "log_sources": request.LogSources}, true)
+	writeJSON(w, 201, map[string]any{"token": token, "expires_in": "15m", "capabilities": request.Capabilities, "log_sources": request.LogSources})
 }
 func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	var b struct {
@@ -514,9 +552,24 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	var tenant string
-	err = tx.QueryRow(r.Context(), "UPDATE enrollment_tokens SET used_at=now() WHERE token_hash=$1 AND used_at IS NULL AND expires_at>now() RETURNING tenant_id", digest(b.Token)).Scan(&tenant)
+	var approvedCapabilities []string
+	var rawSources []byte
+	err = tx.QueryRow(r.Context(), "UPDATE enrollment_tokens SET used_at=now() WHERE token_hash=$1 AND used_at IS NULL AND expires_at>now() RETURNING tenant_id,approved_capabilities,approved_log_sources", digest(b.Token)).Scan(&tenant, &approvedCapabilities, &rawSources)
 	if err != nil {
 		fail(w, 403, "enrollment token invalid")
+		return
+	}
+	requested := slices.Clone(b.Capabilities)
+	slices.Sort(requested)
+	approved := slices.Clone(approvedCapabilities)
+	slices.Sort(approved)
+	if len(requested) > 0 && !slices.Equal(requested, approved) {
+		fail(w, 403, "connector capabilities differ from enrollment approval")
+		return
+	}
+	var sources []logSourceApproval
+	if json.Unmarshal(rawSources, &sources) != nil || !validEnrollmentScope(approvedCapabilities, sources) {
+		fail(w, 503, "enrollment scope unavailable")
 		return
 	}
 	secret, err := randomToken()
@@ -525,16 +578,22 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var cid string
-	err = tx.QueryRow(r.Context(), "INSERT INTO connectors(tenant_id,name,version,capabilities,credential_hash) VALUES($1,$2,$3,$4,$5) RETURNING id", tenant, b.Name, b.Version, b.Capabilities, digest(secret)).Scan(&cid)
+	err = tx.QueryRow(r.Context(), "INSERT INTO connectors(tenant_id,name,version,capabilities,credential_hash) VALUES($1,$2,$3,$4,$5) RETURNING id", tenant, b.Name, b.Version, approvedCapabilities, digest(secret)).Scan(&cid)
 	if err != nil {
 		fail(w, 503, "enrollment failed")
 		return
+	}
+	for _, source := range sources {
+		if _, err = tx.Exec(r.Context(), "INSERT INTO connector_log_sources(tenant_id,connector_id,name,kind,path_sha256) VALUES($1,$2,$3,$4,$5)", tenant, cid, source.Name, source.Kind, source.PathSHA256); err != nil {
+			fail(w, 503, "log source approval unavailable")
+			return
+		}
 	}
 	if err = tx.Commit(r.Context()); err != nil {
 		fail(w, 503, "enrollment failed")
 		return
 	}
-	_, _ = s.Store.Audit(r.Context(), &tenant, "connector:"+cid, "connector.enrolled", cid, "", "success", requestIP(r, s.Config.ProxyCIDRs), map[string]any{"version": b.Version, "capabilities": b.Capabilities}, true)
+	_, _ = s.Store.Audit(r.Context(), &tenant, "connector:"+cid, "connector.enrolled", cid, "", "success", requestIP(r, s.Config.ProxyCIDRs), map[string]any{"version": b.Version, "capabilities": approvedCapabilities, "log_sources": sources}, true)
 	writeJSON(w, 201, map[string]string{"connector_id": cid, "tenant_id": tenant, "credential": secret})
 }
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {

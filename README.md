@@ -11,6 +11,7 @@ Nocturne AegisOps is a multi-tenant operations console and Go control plane for 
 - Keycloak OIDC authorization code with PKCE in the console and token verification, role checks, and tenant membership checks in the API. The local demo uses a loopback-only demo identity instead of Keycloak.
 - PostgreSQL migrations, fictional seed data, a durable `jobs` table, and a notification outbox. A separate Go worker leases jobs, retries failures, and runs mock investigations and simulated operations.
 - A separately deployable, tenant-bound Go connector that sends outbound HTTPS heartbeats and locally approved TCP, host, PostgreSQL, and Valkey health signals. It queues bounded metric batches on disk during outages and does not accept remote commands or probe targets from the control plane. See [connector telemetry](docs/connector-telemetry.md).
+- Opt-in infrastructure service log tailing from approved local files, with encrypted hot batches, tenant-scoped metadata, auditable legal holds, and a separate archive worker that creates verified gzip archives after 365 days. See [service log lifecycle](docs/service-logs.md).
 - A hash-chained PostgreSQL audit trail and a verifier. The email outbox supports disabled, mock, and HTTPS gateway modes; mock delivery is labeled `simulated`.
 - Optional InfluxDB 3 writes for numeric telemetry. Current console graphs read samples from PostgreSQL.
 - A deterministic worker that opens deduplicated degraded, unknown, and stale health incidents from approved component signals. The console can select latency, host, PostgreSQL, and Valkey metrics where samples are available.
@@ -18,7 +19,7 @@ Nocturne AegisOps is a multi-tenant operations console and Go control plane for 
 
 ## Still needed for production
 
-Reviewed connector operation tools and real execution, AegisCore and R2 collectors, service-log collection and verified 365-day archival, an approved AI provider adapter, a deployed Keycloak realm with MFA, scoped secrets delivery, a production email gateway and delivery reconciliation, broader database role isolation, external audit anchoring, backup and restore drills, alert routing, and end-to-end security testing remain open. Cloudflare/Akamai API integration, custom hostname provisioning and routing, certificate lifecycle management, and end-to-end post-quantum cryptography validation are not implemented. The connector requires hybrid ML-KEM key exchange for its control-plane HTTPS connection only. See the [full gate list](docs/production-readiness.md).
+Reviewed connector operation tools and real execution, AegisCore and R2 collectors, rotation-aware log tailing, archive key rotation and mounted Storage Box validation, an approved AI provider adapter, a deployed Keycloak realm with MFA, scoped secrets delivery, a production email gateway and delivery reconciliation, broader database role isolation, external audit anchoring, backup and restore drills, alert routing, and end-to-end security testing remain open. Cloudflare/Akamai API integration, custom hostname provisioning and routing, certificate lifecycle management, and end-to-end post-quantum cryptography validation are not implemented. The connector requires hybrid ML-KEM key exchange for its control-plane HTTPS connection only. See the [full gate list](docs/production-readiness.md).
 
 ## Architecture
 
@@ -29,8 +30,12 @@ flowchart LR
   K[Keycloak, when configured] -->|OIDC login and token endpoint| W
   K -->|Issuer and JWKS| A
   A --> P[(PostgreSQL: tenants, telemetry, jobs, audit, outbox)]
-  C[Customer-bound Go connector] -->|outbound HTTPS heartbeat| A
+  C[Customer-bound Go connector] -->|outbound HTTPS telemetry and approved logs| A
   J[Go worker] <--> P
+  A --> H[(Encrypted hot log files)]
+  L[Go log archive worker] <--> P
+  L --> H
+  L --> R[(Configured archive filesystem)]
   J --> M[Mock model gateway]
   J --> E[Mock or HTTPS email gateway]
   J -. optional writes .-> I[InfluxDB 3]
@@ -121,6 +126,9 @@ The checked-in [`.env.example`](.env.example) is a production-oriented variable 
 | `INFLUX_URL`, `INFLUX_DATABASE`, `INFLUX_TOKEN` | Optional InfluxDB 3 write destination |
 | `TURNSTILE_SECRET`, `TURNSTILE_HOSTNAME`, `TURNSTILE_ACTION` | Optional server-side verification for `/v1/public/contact` |
 | `TRUSTED_PROXY_CIDRS` | Explicitly trusted proxy networks for forwarded request provenance |
+| `LOG_HOT_DIR`, `LOG_KEY_B64` | Optional encrypted service-log hot storage and base64 32-byte key; required to accept logs |
+| `LOG_ARCHIVE_DIR` | Worker archive mount; required when the worker archives service logs |
+| `LOG_HOT_MARKER`, `LOG_ARCHIVE_MARKER` | Expected store identities; matching `.aegisops-store-id` files must exist on provisioned volumes |
 | `DEMO_DB_PASSWORD` | Compose-only password for local PostgreSQL |
 | `CONNECTOR_CREDENTIAL` | Customer connector bearer credential, supplied only to that connector |
 
@@ -128,7 +136,7 @@ Migrations live in [`db/`](db/) and are applied once by `go run ./cmd/migrate`. 
 
 For Keycloak, configure the realm, clients, redirect URI, roles, and MFA as described in [deployment guidance](docs/deployment.md). The console implements authorization code with PKCE and the API checks issuer, audience, roles, and tenant membership. Keycloak is not part of the demo Compose stack. The optional [login theme](deploy/keycloak/README.md) must be installed and selected separately.
 
-Connector enrollment is described in [deployment guidance](docs/deployment.md). It requires a customer authorization record, DNS TXT verification, a one-time enrollment token, and monitoring approval. The [`cmd/connector/`](cmd/connector/) binary reads a local JSON config supplied with `-config` and `CONNECTOR_CREDENTIAL`; it requires an HTTPS control-plane URL and only probes configured hosts, ports, and allowed CIDRs. [Connector telemetry setup](docs/connector-telemetry.md) describes the service-specific monitoring credentials and persistent spool. The HTTP loopback demo API is **not** a connector endpoint. Demo connector rows are seeded fixtures, not running agents.
+Connector enrollment is described in [deployment guidance](docs/deployment.md). It requires a customer authorization record, DNS TXT verification, a one-time enrollment token with server-approved capabilities, and monitoring approval. The [`cmd/connector/`](cmd/connector/) binary reads a local JSON config supplied with `-config` and `CONNECTOR_CREDENTIAL`; it requires an HTTPS control-plane URL and only probes configured hosts, ports, and allowed CIDRs. [Connector telemetry setup](docs/connector-telemetry.md) describes the service-specific monitoring credentials and persistent spool; [service log setup](docs/service-logs.md) covers separate log approval and retention. The HTTP loopback demo API is **not** a connector endpoint. Demo connector rows are seeded fixtures, not running agents.
 
 ## Checks and builds
 
@@ -150,7 +158,7 @@ npm run build
 
 [`deploy/Dockerfile.backend`](deploy/Dockerfile.backend) builds the Go binaries independently; [`deploy/Dockerfile.web`](deploy/Dockerfile.web) builds the console. The repository does not include a production Compose stack, Kubernetes manifests, or infrastructure provisioning. Use the [deployment notes](docs/deployment.md), [operations runbooks](docs/operations.md), [threat model](docs/security.md), and [production gates](docs/production-readiness.md) to plan a deployment.
 
-Tenant authorization is checked in the API, while a separate PostgreSQL reader role and row policies can protect selected customer detail reads in production. Policies, exact-parameter approvals, and kill switches exist, but there is no production operation executor. The audit trail is hash-chained in PostgreSQL; external anchoring, service-log retention controls, and restore validation remain open. Never put provider credentials or customer data in the browser, source, model prompts, or demo seed. The model gateway currently uses a mock provider. Turnstile validation protects only the configured public contact API; Cloudflare/Akamai edge controls and custom domain activation require external work and are not asserted as active by this repository.
+Tenant authorization is checked in the API, while a separate PostgreSQL reader role and row policies can protect selected customer detail reads in production. Policies, exact-parameter approvals, and kill switches exist, but there is no production operation executor. The audit trail is hash-chained in PostgreSQL; external anchoring, archive expiry, key rotation, and operational restore drills remain open. Never put provider credentials or customer data in the browser, source, model prompts, or demo seed. The model gateway currently uses a mock provider. Turnstile validation protects only the configured public contact API; Cloudflare/Akamai edge controls and custom domain activation require external work and are not asserted as active by this repository.
 
 The [Graphify knowledge graph](docs/knowledge-graph/README.md) is a generated code-navigation aid. Its extraction does not replace the source, schema, or security documentation.
 

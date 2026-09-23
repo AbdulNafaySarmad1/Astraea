@@ -33,10 +33,12 @@ The connector's HTTPS client requires TLS 1.3 with `X25519MLKEM768` hybrid key e
 
 The API validates metric names, units, count, timestamps, capabilities, and tenant-bound connector identity. Numeric samples and an audit record commit in one PostgreSQL transaction. Replayed older samples can add history without replacing a newer component state. A health worker opens one incident per degraded, unknown, or stale component signal and closes degraded/unknown incidents after two consecutive healthy samples. It does not execute any infrastructure operation. Component telemetry is stale after 30 minutes; connector connectivity is stale after five minutes.
 
+Named local service log files are a separate opt-in capability with a distinct spool and approval list. See [service log ingestion and archival](service-logs.md) for the data boundary, 365-day lifecycle, legal holds, and current rotation limits.
+
 ## Remaining production work
 
 - Rotate connector credentials and replace the long-lived bearer token with approved workload identity or mutual authentication.
 - Add customer-approved AegisCore inventory discovery, R2 telemetry, application checks, backup/replication verification, and safe service-log collection.
-- Add off-host, encrypted log archiving with manifests, retention/legal holds, verified restore, and deletion only after archive confirmation.
+- Validate the configured off-host archive mount, rotation behavior, key rotation, capacity alerts, and scheduled restore drills for the implemented log pipeline.
 - Add configurable per-customer anomaly rules, alert routing, maintenance windows, and incident acknowledgement.
 - Verify post-quantum transport and key management across the other service connections, certificate signatures, database, storage, and identity provider. Add a deployment check that confirms the configured edge negotiates the required hybrid group.

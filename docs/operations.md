@@ -24,7 +24,13 @@ Take encrypted PostgreSQL base backups and WAL archives at an interval matching 
 
 ## Audit retention and legal hold
 
-Set retention schedules per customer agreement, preserve legal-hold records, and export with tenant-scoped authorization and an audit event. Ordinary application users cannot modify the history through the API. The current schema has no retention job or legal-hold workflow; add them before production use.
+Set retention schedules per customer agreement, preserve legal-hold records, and export with tenant-scoped authorization and an audit event. Ordinary application users cannot modify the history through the API. Audit-event retention and legal-hold workflows are not implemented; the service-log hold below applies only to log batches.
+
+## Service log archive and hold
+
+The service-log worker archives encrypted hot batches after 365 days from receipt. It verifies gzip archive readback and a checksum manifest before marking the batch archived; a later locked step verifies the archive again and deletes only the hot copy when `legal_hold=false`. Inspect `GET /v1/tenants/{tenant}/log-batches` for status and `hot_deleted_at`. To prevent hot-copy deletion for a specific batch, use the authenticated `POST /v1/tenants/{tenant}/log-batches/{connector}/{batch}/legal-hold` with `{"engaged":true}`. This change is audited and queued for customer notice. Legal holds on service logs do not yet cover the separate audit history or database backups.
+
+If archive verification, the remote mount, or the worker fails, leave hot files untouched. Compare manifest and encrypted-file checksums and perform a sampled restore before retrying. A batch becomes `blocked` after eight failed archive attempts; repair the cause, then use `POST /v1/tenants/{tenant}/log-batches/{connector}/{batch}/retry-archive` with a manager identity. Do not delete a hot file manually based on age. Monitor volume capacity, backlog, blocked batches, and connector spool fullness; alert routing remains a production gate. [Service log lifecycle](service-logs.md) documents the recovery limits.
 
 ## Policy or provider failure
 
