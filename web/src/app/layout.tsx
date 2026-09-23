@@ -1,9 +1,17 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Activity, BellRing, BookOpenText, Building2, ClipboardCheck, Clock3, Command, LayoutDashboard, LockKeyhole, ScrollText, Settings2, ShieldCheck, ScanSearch, LogOut } from 'lucide-react';
+import Image from 'next/image';
+import { Activity, BellRing, BookOpenText, Building2, ClipboardCheck, Clock3, LayoutDashboard, LockKeyhole, ScrollText, Settings2, ShieldCheck, ScanSearch, LogOut } from 'lucide-react';
 import './styles.css';
 
-export const metadata: Metadata = { title: 'Nocturn Operations', description: 'AegisCore infrastructure operations' };
+export const metadata: Metadata = {
+  title: 'Nocturn Operations',
+  description: 'AegisCore infrastructure operations',
+  icons: {
+    icon: [{ url: '/brand/nocturn-mark.png', type: 'image/png', sizes: '1254x1254' }],
+    apple: [{ url: '/brand/nocturn-mark.png', type: 'image/png', sizes: '1254x1254' }],
+  },
+};
 const nav = [
   { href: '/fleet', label: 'Fleet overview', icon: LayoutDashboard },
   { href: '/customers', label: 'Customers', icon: Building2 },
@@ -16,7 +24,7 @@ const nav = [
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return <html lang="en"><body><div className="shell">
     <aside className="sidebar" aria-label="Primary navigation">
-      <Link className="brand" href="/fleet"><span className="brand-mark"><Command size={19}/></span><span><strong>NOCTURN</strong><small>OPERATIONS</small></span></Link>
+      <Link className="brand" href="/fleet"><span className="brand-mark"><Image className="brand-logo" src="/brand/nocturn-mark.png" width={38} height={38} alt="" priority /></span><span><strong>NOCTURN</strong><small>OPERATIONS</small></span></Link>
       <div className="workspace-label">WORKSPACE <span>01</span></div>
       <nav className="side-nav">{nav.map(({href,label,icon: Icon}) => <Link key={href} href={href}><Icon size={17} strokeWidth={1.8}/>{label}</Link>)}</nav>
       <div className="sidebar-bottom"><div className="sidebar-rule"/><a href="/settings#knowledge"><BookOpenText size={17}/> Runbooks & knowledge</a><div className="support"><ShieldCheck size={15}/><span>Policy gated operations</span></div></div>
