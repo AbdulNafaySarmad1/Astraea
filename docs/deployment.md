@@ -40,7 +40,7 @@ Cloudflare or Akamai can be placed in front of the console and API. Configure TL
 
 ## Connector enrollment
 
-Create a customer with authorization reference and recipients. Publish the DNS challenge, verify it, issue a 15-minute enrollment token, and submit it to `/v1/connectors/enroll` with connector name, version, and capabilities. Store the returned credential in that customer's Infisical scope; it appears only once. Use a local connector config with approved probe hosts, ports, and CIDRs. The connector requires HTTPS and resolves each host, then connects only to an IP inside a configured CIDR. Review local config with the customer. Approve monitoring only after the domain and connector are ready. The demo fixture is pre-approved solely for UI and API validation.
+Create a customer with authorization reference and recipients. Publish the DNS challenge, verify it, issue a 15-minute enrollment token, and submit it to `/v1/connectors/enroll` with connector name, version, and approved capabilities. Store the returned credential in that customer's Infisical scope; it appears only once. Use a local connector config with approved probe hosts, ports, and CIDRs. The connector requires HTTPS and resolves each host, then connects only to an IP inside a configured CIDR. Give it a persistent private spool directory and customer-specific read-only PostgreSQL/Valkey monitoring credentials where those probes are enabled. Review local config with the customer. [Connector telemetry setup](connector-telemetry.md) lists the supported signals and limits. Approve monitoring only after the domain and connector are ready. The demo fixture is pre-approved solely for UI and API validation.
 
 ## Release controls
 

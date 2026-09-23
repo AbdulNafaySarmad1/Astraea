@@ -255,7 +255,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		if rows.Scan(&n, &k, &st, &at) != nil {
 			break
 		}
-		fresh := at != nil && time.Since(*at) < 5*time.Minute
+		fresh := at != nil && time.Since(*at) < 30*time.Minute
 		if !fresh {
 			st = "stale"
 		}
@@ -537,65 +537,18 @@ func (s *Server) enroll(w http.ResponseWriter, r *http.Request) {
 	_, _ = s.Store.Audit(r.Context(), &tenant, "connector:"+cid, "connector.enrolled", cid, "", "success", requestIP(r, s.Config.ProxyCIDRs), map[string]any{"version": b.Version, "capabilities": b.Capabilities}, true)
 	writeJSON(w, 201, map[string]string{"connector_id": cid, "tenant_id": tenant, "credential": secret})
 }
-func (s *Server) heartbeat(w http.ResponseWriter, r *http.Request) {
-	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-	if token == "" || len(token) != 64 {
-		fail(w, 401, "connector credential required")
-		return
-	}
-	var b struct {
-		Version    string `json:"version"`
-		Components []struct {
-			Name       string    `json:"name"`
-			Kind       string    `json:"kind"`
-			Status     string    `json:"status"`
-			ObservedAt time.Time `json:"observed_at"`
-			LatencyMS  *float64  `json:"latency_ms"`
-		} `json:"components"`
-	}
-	if decode(r, &b) != nil || len(b.Components) > 100 {
-		fail(w, 400, "invalid telemetry")
-		return
-	}
-	var tenant, cid string
-	var approved, kill bool
-	err := s.Store.DB.QueryRow(r.Context(), "SELECT c.tenant_id,c.id,t.monitoring_approved,t.kill_switch FROM connectors c JOIN tenants t ON t.id=c.tenant_id WHERE c.credential_hash=$1 AND c.revoked_at IS NULL", digest(token)).Scan(&tenant, &cid, &approved, &kill)
-	if err != nil {
-		fail(w, 401, "connector revoked or unknown")
-		return
-	}
-	if kill || !approved {
-		fail(w, 403, "monitoring disabled")
-		return
-	}
-	_, err = s.Store.DB.Exec(r.Context(), "UPDATE connectors SET last_seen_at=now(),last_telemetry_at=now(),version=$2 WHERE id=$1", cid, b.Version)
-	if err != nil {
-		fail(w, 503, "telemetry unavailable")
-		return
-	}
-	for _, c := range b.Components {
-		if len(c.Name) > 120 || len(c.Kind) > 60 || c.Name == "" || strings.ContainsAny(c.Name, "\r\n") || c.ObservedAt.After(time.Now().Add(time.Minute)) || time.Since(c.ObservedAt) > time.Hour {
-			continue
-		}
-		if c.Status != "healthy" && c.Status != "degraded" && c.Status != "unknown" {
-			continue
-		}
-		_, _ = s.Store.DB.Exec(r.Context(), "INSERT INTO components(tenant_id,connector_id,name,kind,status,observed_at) VALUES($1,$2,$3,$4,$5,$6) ON CONFLICT(tenant_id,name) DO UPDATE SET status=EXCLUDED.status,observed_at=EXCLUDED.observed_at,connector_id=EXCLUDED.connector_id", tenant, cid, c.Name, c.Kind, c.Status, c.ObservedAt)
-		if c.LatencyMS != nil && *c.LatencyMS >= 0 && *c.LatencyMS <= 30000 {
-			_, _ = s.Store.DB.Exec(r.Context(), "INSERT INTO telemetry(tenant_id,connector_id,metric,value,unit,observed_at) VALUES($1,$2,'probe_latency_ms',$3,'ms',$4)", tenant, cid, *c.LatencyMS, c.ObservedAt)
-			if s.Config.InfluxURL != "" {
-				line := fmt.Sprintf("probe_latency,tenant=%s,connector=%s value=%f %d", tenant, cid, *c.LatencyMS, c.ObservedAt.UnixNano())
-				payload, _ := json.Marshal(line)
-				_, _ = s.Store.DB.Exec(r.Context(), "INSERT INTO jobs(tenant_id,kind,payload,idempotency_key) VALUES($1,'influx_write',$2,$3) ON CONFLICT DO NOTHING", tenant, payload, cid+":"+c.Name+":"+c.ObservedAt.Format(time.RFC3339Nano))
-			}
-		}
-	}
-	_, _ = s.Store.Audit(r.Context(), &tenant, "connector:"+cid, "telemetry.collected", cid, "", "success", requestIP(r, s.Config.ProxyCIDRs), map[string]any{"component_count": len(b.Components)}, false)
-	writeJSON(w, 200, map[string]string{"status": "accepted"})
-}
 func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	id, ok := s.allow(w, r, "view")
 	if !ok {
+		return
+	}
+	metric := r.URL.Query().Get("metric")
+	if metric == "" {
+		metric = "probe_latency_ms"
+	}
+	unit, allowed := metricUnits[metric]
+	if !allowed {
+		fail(w, 400, "unsupported metric")
 		return
 	}
 	read, ok := s.tenantRead(w, r, id)
@@ -614,7 +567,11 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	if window == "7d" {
 		hours = 168
 	}
-	rows, err := read.Query(r.Context(), "SELECT observed_at,avg(value) FROM telemetry WHERE tenant_id=$1 AND metric='probe_latency_ms' AND observed_at>=now()-($2::int * interval '1 hour') GROUP BY observed_at ORDER BY observed_at LIMIT 500", id, hours)
+	rows, err := read.Query(r.Context(), `SELECT observed_at,value FROM (
+ SELECT observed_at,avg(value) AS value FROM telemetry
+ WHERE tenant_id=$1 AND metric=$2 AND observed_at>=now()-($3::int * interval '1 hour')
+ GROUP BY observed_at ORDER BY observed_at DESC LIMIT 500
+ ) recent ORDER BY observed_at`, id, metric, hours)
 	if err != nil {
 		fail(w, 503, "telemetry unavailable")
 		return
@@ -629,11 +586,11 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 		}
 		points = append(points, map[string]any{"at": at, "value": value})
 	}
-	if s.log(r, &id, "telemetry.viewed", id, "success", map[string]any{"window": window}, true) != nil {
+	if s.log(r, &id, "telemetry.viewed", id, "success", map[string]any{"window": window, "metric": metric}, true) != nil {
 		fail(w, 503, "audit unavailable")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"metric": "probe_latency_ms", "unit": "ms", "window": window, "points": points})
+	writeJSON(w, 200, map[string]any{"metric": metric, "unit": unit, "window": window, "points": points})
 }
 func (s *Server) edgeStatus(w http.ResponseWriter, r *http.Request) {
 	if !actorFrom(r.Context()).platform() {

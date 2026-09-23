@@ -11,7 +11,7 @@ END $$;
 GRANT USAGE ON SCHEMA public TO nocturn_tenant_reader;
 REVOKE ALL PRIVILEGES ON tenants,memberships,domains,connectors,enrollment_tokens,
   components,telemetry,incidents,policies,action_requests,jobs,audit_events,
-  notification_outbox,knowledge_documents,investigations FROM nocturn_tenant_reader;
+  notification_outbox,knowledge_documents,investigations,connector_batches FROM nocturn_tenant_reader;
 GRANT SELECT(id,name,slug,status,isolation_mode,monitoring_approved,
   operations_approved,kill_switch,notification_recipients,created_at)
   ON tenants TO nocturn_tenant_reader;
@@ -46,7 +46,8 @@ BEGIN
   FOREACH table_name IN ARRAY ARRAY[
     'tenants','memberships','domains','connectors','enrollment_tokens',
     'components','telemetry','incidents','policies','action_requests','jobs',
-    'audit_events','notification_outbox','knowledge_documents','investigations'
+    'audit_events','notification_outbox','knowledge_documents','investigations',
+    'connector_batches'
   ] LOOP
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY',table_name);
     EXECUTE format('DROP POLICY IF EXISTS tenant_reader_scope ON %I',table_name);

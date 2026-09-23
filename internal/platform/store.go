@@ -51,7 +51,7 @@ func (s *Store) OpenTenantReader(ctx context.Context, url string) error {
          ON owner_policies.tablename=owned.relname AND owner_policies.schemaname='public'
        WHERE owner_policies.policyname='tenant_reader_scope'
          AND owned.relnamespace='public'::regnamespace),
-      (SELECT count(*)=15 AND count(DISTINCT tables.oid)=15
+      (SELECT count(*)=16 AND count(DISTINCT tables.oid)=16
          AND bool_and(policies.policyname='tenant_reader_scope')
        FROM pg_class tables
        JOIN pg_policies policies ON policies.tablename=tables.relname
@@ -63,7 +63,7 @@ func (s *Store) OpenTenantReader(ctx context.Context, url string) error {
          'public.policies'::regclass,'public.action_requests'::regclass,
          'public.jobs'::regclass,'public.audit_events'::regclass,
          'public.notification_outbox'::regclass,'public.knowledge_documents'::regclass,
-         'public.investigations'::regclass) AND tables.relrowsecurity)
+         'public.investigations'::regclass,'public.connector_batches'::regclass) AND tables.relrowsecurity)
       FROM pg_roles session_role, pg_roles active_role
       WHERE session_role.rolname=session_user AND active_role.rolname=current_user
       `).Scan(&member, &privileged, &owner, &policiesReady)
@@ -133,17 +133,29 @@ type AuditEvent struct {
 }
 
 func (s *Store) Audit(ctx context.Context, tenantID *string, actor, kind, resource, correlation, outcome, ip string, detail any, notify bool) (string, error) {
-	raw, _ := json.Marshal(detail)
-	if len(raw) == 0 {
-		raw = []byte("{}")
-	}
 	tx, err := s.DB.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback(ctx)
+	id, err := s.AuditTx(ctx, tx, tenantID, actor, kind, resource, correlation, outcome, ip, detail, notify)
+	if err != nil {
+		return "", err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return "", err
+	}
+	return id, nil
+}
+
+// AuditTx lets ingestion commit its data and hash-chained audit record together.
+func (s *Store) AuditTx(ctx context.Context, tx pgx.Tx, tenantID *string, actor, kind, resource, correlation, outcome, ip string, detail any, notify bool) (string, error) {
+	raw, _ := json.Marshal(detail)
+	if len(raw) == 0 {
+		raw = []byte("{}")
+	}
 	var prev string
-	if err = tx.QueryRow(ctx, "SELECT event_hash FROM audit_chain_head WHERE id=true FOR UPDATE").Scan(&prev); err != nil {
+	if err := tx.QueryRow(ctx, "SELECT event_hash FROM audit_chain_head WHERE id=true FOR UPDATE").Scan(&prev); err != nil {
 		return "", err
 	}
 	id, err := randomID()
@@ -174,9 +186,6 @@ func (s *Store) Audit(ctx context.Context, tenantID *string, actor, kind, resour
 		if err != nil {
 			return "", err
 		}
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return "", err
 	}
 	return id, nil
 }

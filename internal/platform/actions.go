@@ -138,7 +138,7 @@ func (s *Server) executeAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var connected bool
-	_ = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM components c JOIN connectors x ON x.id=c.connector_id WHERE c.tenant_id=$1 AND c.name=$2 AND x.revoked_at IS NULL AND x.last_seen_at>now()-interval '5 minutes')", id, target).Scan(&connected)
+	_ = tx.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM components c JOIN connectors x ON x.id=c.connector_id WHERE c.tenant_id=$1 AND c.name=$2 AND c.observed_at>now()-interval '30 minutes' AND x.revoked_at IS NULL AND x.last_seen_at>now()-interval '5 minutes')", id, target).Scan(&connected)
 	if !connected {
 		fail(w, 409, "connector unavailable or telemetry stale")
 		return

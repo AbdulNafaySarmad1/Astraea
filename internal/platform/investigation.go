@@ -116,7 +116,7 @@ func (w *Worker) investigate(ctx context.Context, tenant, id string) error {
 	if err != nil || killed {
 		return errors.New("investigation disabled")
 	}
-	rows, err := w.Store.DB.Query(ctx, "SELECT name,kind,status,observed_at FROM components WHERE tenant_id=$1 AND observed_at>now()-interval '5 minutes' ORDER BY name LIMIT 100", tenant)
+	rows, err := w.Store.DB.Query(ctx, "SELECT name,kind,status,observed_at FROM components WHERE tenant_id=$1 AND observed_at>now()-interval '30 minutes' ORDER BY name LIMIT 100", tenant)
 	if err != nil {
 		return err
 	}

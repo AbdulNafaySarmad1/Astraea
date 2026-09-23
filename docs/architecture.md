@@ -5,7 +5,7 @@
 1. **Browser to console:** OIDC authorization code with PKCE. Access tokens remain in an HttpOnly, SameSite cookie and are proxied server-side to the API. Mutating proxy requests require a matching Origin. The Keycloak realm supplies SSO and MFA policy.
 2. **Console to API:** Bearer JWT validation uses the realm discovery document, JWKS, issuer, audience, signature, and expiry. The API enforces role and membership per route. A client-provided tenant path never grants membership.
 3. **API to PostgreSQL:** Customer-owned tables carry `tenant_id`; queries include it. Composite foreign keys reject cross-tenant references. Tenant detail GET routes can use a separate, read-only role with transaction-local row-level security. The database stores tenant registry, enrollment state, action policy, approval, durable jobs, audit metadata, and notification delivery. Remaining primary-connection paths need separate database roles and row-level security before production use.
-4. **Connector to API:** A connector enrolls with a one-time, 15-minute token; the server returns a unique credential once. The connector initiates HTTPS heartbeats. It is tied to one tenant, capabilities, version, and revocation state. Deploy one connector per customer boundary. Its local probe config controls which IP networks it can reach.
+4. **Connector to API:** A connector enrolls with a one-time, 15-minute token; the server returns a unique credential once. The connector initiates HTTPS heartbeats and sends replay-safe metric batches. It is tied to one tenant, capabilities, version, and revocation state. Deploy one connector per customer boundary. Its local probe config controls which IP networks it can reach. The current collectors cover TCP, connector-host, PostgreSQL, and Valkey health; [collector details](connector-telemetry.md) state their limits.
 5. **Worker to external services:** Jobs are claimed with PostgreSQL `FOR UPDATE SKIP LOCKED`, leased, retried with bounded backoff, and dead-lettered. Per-tenant running-job exclusion bounds concurrency. InfluxDB receives sanitized numeric latency metrics. The email adapter receives a minimal event record. The mock model gateway only receives recent structured component signals and reviewed source links.
 
 ## Onboarding sequence
@@ -14,7 +14,7 @@ Customer record with authorization reference and recipients → DNS TXT challeng
 
 ## Health semantics
 
-Component status is `healthy`, `degraded`, or `unknown` only while its observation is younger than five minutes. Older observations render as `stale`. A connector is `connected` only when it has reported within five minutes and is not revoked. No signal is interpreted as healthy. AegisCore scaling remains independent.
+Component status is `healthy`, `degraded`, or `unknown` only while its observation is younger than 30 minutes, matching the default 15-minute collection interval. Older observations render as `stale`. A connector is `connected` only when it has reported within five minutes and is not revoked. The worker opens deduplicated degraded, unknown, and stale incidents; it resolves degraded/unknown incidents after two healthy reports. No absent signal is interpreted as healthy. AegisCore scaling remains independent.
 
 ## Operations
 

@@ -21,7 +21,9 @@ type Worker struct {
 
 func (w *Worker) Run(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)
+	freshnessTicker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
+	defer freshnessTicker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -29,6 +31,8 @@ func (w *Worker) Run(ctx context.Context) {
 		case <-ticker.C:
 			w.processJob(ctx)
 			w.processNotification(ctx)
+		case <-freshnessTicker.C:
+			w.evaluateStale(ctx)
 		}
 	}
 }
@@ -77,6 +81,8 @@ func (w *Worker) processJob(ctx context.Context) {
 		} else {
 			runErr = w.investigate(runCtx, tenant, p["investigation_id"])
 		}
+	case "evaluate_health":
+		runErr = w.evaluateHealth(runCtx, tenant)
 	default:
 		runErr = errors.New("unknown job kind")
 	}

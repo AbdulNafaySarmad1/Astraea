@@ -84,6 +84,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/connectors/heartbeat": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["connectorHeartbeat"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tenants/{tenant}/domains": {
         parameters: {
             query?: never;
@@ -331,6 +347,38 @@ export interface components {
                 value: number;
             }[];
         };
+        ConnectorMetric: {
+            /** @enum {string} */
+            name: "host_cpu_usage_pct" | "host_memory_used_pct" | "host_root_disk_used_pct" | "host_network_rx_bytes_total" | "host_network_tx_bytes_total" | "postgres_connections" | "postgres_rollbacks_total" | "postgres_replica_count" | "postgres_replay_backlog_bytes" | "valkey_used_memory_bytes" | "valkey_connected_clients" | "valkey_evicted_keys_total";
+            value: number;
+            unit: string;
+        };
+        ConnectorHeartbeat: {
+            /**
+             * Format: uuid
+             * @description Must match the authenticated connector's tenant
+             */
+            tenant_id: string;
+            /**
+             * Format: uuid
+             * @description Must match the authenticated connector
+             */
+            connector_id: string;
+            /** @description Required when components is nonempty; retained across retries */
+            batch_id?: string;
+            version: string;
+            components: {
+                name: string;
+                /** @enum {string} */
+                kind: "tcp" | "postgres" | "valkey" | "host";
+                /** @enum {string} */
+                status: "healthy" | "degraded" | "unknown";
+                /** Format: date-time */
+                observed_at: string;
+                latency_ms?: number;
+                metrics?: components["schemas"]["ConnectorMetric"][];
+            }[];
+        };
         Investigation: {
             /** Format: uuid */
             id: string;
@@ -483,6 +531,8 @@ export interface operations {
         parameters: {
             query?: {
                 window?: "1h" | "24h" | "7d";
+                /** @description One of the named numeric metrics in ConnectorMetric */
+                metric?: string;
             };
             header?: never;
             path: {
@@ -500,6 +550,42 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["MetricSeries"];
                 };
+            };
+        };
+    };
+    connectorHeartbeat: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectorHeartbeat"];
+            };
+        };
+        responses: {
+            /** @description Batch accepted or already recorded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid or unauthorized telemetry */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Connector credential revoked or unknown */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

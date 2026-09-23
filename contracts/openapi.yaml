@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: Nocturn Operations API
-  version: 1.0.0
+  version: 1.1.0
   description: Tenant-scoped control-plane API. Bearer tokens are validated against Keycloak.
 servers:
   - url: /v1
@@ -10,6 +10,7 @@ security:
 components:
   securitySchemes:
     bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+    connectorAuth: {type: http, scheme: bearer, bearerFormat: opaque}
   schemas:
     Tenant:
       type: object
@@ -131,6 +132,34 @@ components:
         points:
           type: array
           items: {type: object, required: [at,value], properties: {at: {type: string, format: date-time}, value: {type: number}}}
+    ConnectorMetric:
+      type: object
+      required: [name,value,unit]
+      properties:
+        name: {type: string, enum: [host_cpu_usage_pct,host_memory_used_pct,host_root_disk_used_pct,host_network_rx_bytes_total,host_network_tx_bytes_total,postgres_connections,postgres_rollbacks_total,postgres_replica_count,postgres_replay_backlog_bytes,valkey_used_memory_bytes,valkey_connected_clients,valkey_evicted_keys_total]}
+        value: {type: number, minimum: 0}
+        unit: {type: string}
+    ConnectorHeartbeat:
+      type: object
+      required: [tenant_id,connector_id,version,components]
+      properties:
+        tenant_id: {type: string, format: uuid, description: Must match the authenticated connector's tenant}
+        connector_id: {type: string, format: uuid, description: Must match the authenticated connector}
+        batch_id: {type: string, pattern: '^[0-9a-f]{32}$', description: Required when components is nonempty; retained across retries}
+        version: {type: string}
+        components:
+          type: array
+          maxItems: 100
+          items:
+            type: object
+            required: [name,kind,status,observed_at]
+            properties:
+              name: {type: string, maxLength: 120}
+              kind: {type: string, enum: [tcp,postgres,valkey,host]}
+              status: {type: string, enum: [healthy,degraded,unknown]}
+              observed_at: {type: string, format: date-time}
+              latency_ms: {type: number, minimum: 0, maximum: 30000}
+              metrics: {type: array, maxItems: 16, items: {$ref: '#/components/schemas/ConnectorMetric'}}
     Investigation:
       type: object
       required: [id,requested_by,status,summary,uncertainty,evidence,sources,provider,created_at]
@@ -174,8 +203,17 @@ paths:
   /tenants/{tenant}/metrics:
     get:
       operationId: getMetrics
-      parameters: [{name: tenant, in: path, required: true, schema: {type: string, format: uuid}}, {name: window, in: query, schema: {type: string, enum: ['1h','24h','7d']}}]
+      parameters: [{name: tenant, in: path, required: true, schema: {type: string, format: uuid}}, {name: window, in: query, schema: {type: string, enum: ['1h','24h','7d']}}, {name: metric, in: query, schema: {type: string}, description: One of the named numeric metrics in ConnectorMetric, or probe_latency_ms}]
       responses: {'200': {description: Telemetry series, content: {application/json: {schema: {$ref: '#/components/schemas/MetricSeries'}}}}}
+  /connectors/heartbeat:
+    post:
+      operationId: connectorHeartbeat
+      security: [{connectorAuth: []}]
+      requestBody: {required: true, content: {application/json: {schema: {$ref: '#/components/schemas/ConnectorHeartbeat'}}}}
+      responses:
+        '200': {description: Batch accepted or already recorded}
+        '400': {description: Invalid or unauthorized telemetry}
+        '401': {description: Connector credential revoked or unknown}
   /tenants/{tenant}/domains:
     get:
       operationId: listDomains
