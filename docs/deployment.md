@@ -12,6 +12,8 @@ Build and deploy `cmd/control-plane`, `cmd/worker`, and `cmd/connector` as separ
 
 Create separate clients for the browser and API audience. Configure the browser client for authorization code with PKCE, registered HTTPS redirect URI `/auth/callback`, valid post-logout redirect URI `/auth/login`, and the intended console hostname. Configure realm roles `platform_admin`, `ops_engineer`, `read_only_operator`, `audit_reviewer`, and `customer_viewer`; use the `memberships` table for resource scope. Enforce MFA and session policy in Keycloak. Set `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_CLIENT_ID`, and canonical `PUBLIC_URL`. The API validates Keycloak JWKS and issuer on every token. Sign out clears the local cookie and redirects through Keycloak's OIDC logout endpoint.
 
+The supplied Nocturn mark is also packaged in `deploy/keycloak/themes/nocturn/login` for the external sign-in page. Deploy and select that realm login theme as described in `deploy/keycloak/README.md`; verify its appearance against the pinned Keycloak version in staging.
+
 ## Secrets
 
 Use self-hosted Infisical machine identities with narrowly scoped projects and environments. Inject `DATABASE_URL`, `INFLUX_TOKEN`, `EMAIL_PROVIDER_TOKEN`, `TURNSTILE_SECRET`, and connector credentials into service processes at startup through an Infisical agent or workload identity integration. Use distinct identities for API, worker, notification adapter, and each customer connector. Do not share one token across tenants. Rotate at the secret manager and restart or re-enroll workloads as appropriate. No production secret belongs in `.env`, source, browser storage, model prompts, or email.
