@@ -1,0 +1,10 @@
+.git
+node_modules
+web/.next
+.npm-cache
+.gomodcache
+.gocache
+.graphify-python
+.env*
+graphify-out
+docs/knowledge-graph/graphify-out

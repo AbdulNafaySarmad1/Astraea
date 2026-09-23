@@ -1,0 +1,16 @@
+node_modules/
+.next/
+.env
+.env.*.local
+!.env.example
+*.exe
+coverage/
+/graphify-out/
+docs/knowledge-graph/graphify-out/cache/
+docs/knowledge-graph/graphify-out/.graphify_*
+docs/knowledge-graph/graphify-out/manifest.json
+.npm-cache/
+.gomodcache/
+.gocache/
+.graphify-python/
+*.tsbuildinfo

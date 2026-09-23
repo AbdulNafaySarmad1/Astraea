@@ -1,0 +1,226 @@
+openapi: 3.1.0
+info:
+  title: Nocturn Operations API
+  version: 1.0.0
+  description: Tenant-scoped control-plane API. Bearer tokens are validated against Keycloak.
+servers:
+  - url: /v1
+security:
+  - bearerAuth: []
+components:
+  securitySchemes:
+    bearerAuth: {type: http, scheme: bearer, bearerFormat: JWT}
+  schemas:
+    Tenant:
+      type: object
+      required: [id,name,slug,status,isolation_mode,monitoring_approved,operations_approved,kill_switch,created_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        slug: {type: string}
+        status: {type: string, enum: [onboarding,active,suspended]}
+        isolation_mode: {type: string, enum: [shared,dedicated]}
+        monitoring_approved: {type: boolean}
+        operations_approved: {type: boolean}
+        kill_switch: {type: boolean}
+        created_at: {type: string, format: date-time}
+    Component:
+      type: object
+      required: [name,kind,status]
+      properties:
+        name: {type: string}
+        kind: {type: string}
+        status: {type: string, enum: [healthy,degraded,unknown,stale]}
+        observed_at: {type: [string,'null'], format: date-time}
+    Domain:
+      type: object
+      required: [id,hostname,surface,status,certificate_status,expires_at]
+      properties:
+        id: {type: string, format: uuid}
+        hostname: {type: string}
+        surface: {type: string}
+        status: {type: string}
+        certificate_status: {type: string}
+        verified_at: {type: [string,'null'], format: date-time}
+        expires_at: {type: string, format: date-time}
+    Connector:
+      type: object
+      required: [id,name,version,capabilities,status,created_at]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        version: {type: string}
+        capabilities: {type: array, items: {type: string}}
+        status: {type: string}
+        last_seen_at: {type: [string,'null'], format: date-time}
+        last_telemetry_at: {type: [string,'null'], format: date-time}
+        created_at: {type: string, format: date-time}
+    Overview:
+      type: object
+      required: [id,name,status,isolation_mode,monitoring_approved,operations_approved,kill_switch,connected_connectors,open_incidents,pending_approvals,components]
+      properties:
+        id: {type: string, format: uuid}
+        name: {type: string}
+        status: {type: string}
+        isolation_mode: {type: string}
+        monitoring_approved: {type: boolean}
+        operations_approved: {type: boolean}
+        kill_switch: {type: boolean}
+        connected_connectors: {type: integer}
+        open_incidents: {type: integer}
+        pending_approvals: {type: integer}
+        notification_recipients: {type: array, items: {type: string}}
+        components: {type: array, items: {$ref: '#/components/schemas/Component'}}
+    Incident:
+      type: object
+      required: [id,title,severity,status,opened_at,summary]
+      properties:
+        id: {type: string, format: uuid}
+        title: {type: string}
+        severity: {type: string}
+        status: {type: string}
+        opened_at: {type: string, format: date-time}
+        acknowledged_at: {type: [string,'null'], format: date-time}
+        resolved_at: {type: [string,'null'], format: date-time}
+        summary: {type: string}
+    Action:
+      type: object
+      required: [id,target,action_type,purpose,impact,status,requested_by,created_at]
+      properties:
+        id: {type: string, format: uuid}
+        target: {type: string}
+        action_type: {type: string}
+        purpose: {type: string}
+        impact: {type: string}
+        status: {type: string}
+        requested_by: {type: string}
+        approved_by: {type: [string,'null']}
+        created_at: {type: string, format: date-time}
+        approval_expires_at: {type: [string,'null'], format: date-time}
+    AuditEvent:
+      type: object
+      required: [id,actor,event_type,resource,correlation_id,outcome,occurred_at,detail]
+      properties:
+        id: {type: string, format: uuid}
+        tenant_id: {type: [string,'null'], format: uuid}
+        actor: {type: string}
+        event_type: {type: string}
+        resource: {type: string}
+        correlation_id: {type: string}
+        outcome: {type: string}
+        occurred_at: {type: string, format: date-time}
+        detail: {type: object, additionalProperties: true}
+    Notification:
+      type: object
+      required: [id,recipient,status,attempts,event_type,occurred_at]
+      properties:
+        id: {type: string, format: uuid}
+        recipient: {type: string}
+        status: {type: string}
+        attempts: {type: integer}
+        delivered_at: {type: [string,'null'], format: date-time}
+        event_type: {type: string}
+        occurred_at: {type: string, format: date-time}
+    MetricSeries:
+      type: object
+      required: [metric,unit,window,points]
+      properties:
+        metric: {type: string}
+        unit: {type: string}
+        window: {type: string}
+        points:
+          type: array
+          items: {type: object, required: [at,value], properties: {at: {type: string, format: date-time}, value: {type: number}}}
+    Investigation:
+      type: object
+      required: [id,requested_by,status,summary,uncertainty,evidence,sources,provider,created_at]
+      properties:
+        id: {type: string, format: uuid}
+        requested_by: {type: string}
+        status: {type: string}
+        summary: {type: string}
+        uncertainty: {type: string}
+        evidence: {type: array, items: {type: object, additionalProperties: true}}
+        sources: {type: array, items: {type: string}}
+        provider: {type: string}
+        created_at: {type: string, format: date-time}
+        completed_at: {type: [string,'null'], format: date-time}
+    Error: {type: object, required: [error], properties: {error: {type: string}}}
+paths:
+  /me:
+    get:
+      operationId: getMe
+      responses:
+        '200': {description: Actor, content: {application/json: {schema: {type: object, properties: {subject: {type: string}, roles: {type: array, items: {type: string}}}}}}}
+  /tenants:
+    get:
+      operationId: listTenants
+      responses:
+        '200': {description: Authorized tenants, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Tenant'}}}}}}}
+    post:
+      operationId: createTenant
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [name,slug,authorization_record,notification_recipients], properties: {name: {type: string}, slug: {type: string}, isolation_mode: {type: string}, authorization_record: {type: string}, notification_recipients: {type: array, items: {type: string}}}}}}}
+      responses: {'201': {description: Created}}
+  /tenants/{tenant}/overview:
+    get:
+      operationId: getOverview
+      parameters: [{name: tenant, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Tenant overview, content: {application/json: {schema: {$ref: '#/components/schemas/Overview'}}}}}
+  /tenants/{tenant}/incidents:
+    get:
+      operationId: listIncidents
+      parameters: [{name: tenant, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Incidents, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Incident'}}}}}}}}
+  /tenants/{tenant}/metrics:
+    get:
+      operationId: getMetrics
+      parameters: [{name: tenant, in: path, required: true, schema: {type: string, format: uuid}}, {name: window, in: query, schema: {type: string, enum: ['1h','24h','7d']}}]
+      responses: {'200': {description: Telemetry series, content: {application/json: {schema: {$ref: '#/components/schemas/MetricSeries'}}}}}
+  /tenants/{tenant}/domains:
+    get:
+      operationId: listDomains
+      parameters: [{name: tenant, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Customer domains, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Domain'}}}}}}}}
+    post:
+      operationId: createDomain
+      parameters: [{name: tenant, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [hostname,surface], properties: {hostname: {type: string}, surface: {type: string}}}}}}
+      responses: {'201': {description: Challenge created}}
+  /tenants/{tenant}/connectors:
+    get:
+      operationId: listConnectors
+      parameters: [{name: tenant, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Customer connectors, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Connector'}}}}}}}}
+  /tenants/{tenant}/actions:
+    get:
+      operationId: listActions
+      parameters: [{name: tenant, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Actions, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Action'}}}}}}}}
+    post:
+      operationId: proposeAction
+      parameters: [{name: tenant, in: path, required: true, schema: {type: string, format: uuid}}]
+      requestBody: {required: true, content: {application/json: {schema: {type: object, required: [target,action_type,purpose,parameters,impact,preconditions,rollback_plan,verification_steps], properties: {target: {type: string}, action_type: {type: string}, purpose: {type: string}, parameters: {type: object, additionalProperties: true}, impact: {type: string}, preconditions: {type: string}, rollback_plan: {type: string}, verification_steps: {type: string}}}}}}
+      responses: {'201': {description: Proposed}}
+  /tenants/{tenant}/investigations:
+    get:
+      operationId: listInvestigations
+      parameters: [{name: tenant, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Investigations, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Investigation'}}}}}}}}
+    post:
+      operationId: startInvestigation
+      parameters: [{name: tenant, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'202': {description: Queued}}
+  /tenants/{tenant}/audit:
+    get:
+      operationId: listAudit
+      parameters: [{name: tenant, in: path, required: true, schema: {type: string, format: uuid}}, {name: limit, in: query, schema: {type: integer, maximum: 200}}]
+      responses: {'200': {description: Audit history, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/AuditEvent'}}}}}}}}
+  /tenants/{tenant}/notifications:
+    get:
+      operationId: listNotifications
+      parameters: [{name: tenant, in: path, required: true, schema: {type: string, format: uuid}}]
+      responses: {'200': {description: Delivery history, content: {application/json: {schema: {type: object, required: [items], properties: {items: {type: array, items: {$ref: '#/components/schemas/Notification'}}}}}}}}
+  /edge:
+    get:
+      operationId: getEdge
+      responses: {'200': {description: Edge status, content: {application/json: {schema: {type: object, properties: {provider: {type: string}, status: {type: string}, origin_protected: {type: boolean}, last_checked_at: {type: [string,'null'], format: date-time}}}}}}}

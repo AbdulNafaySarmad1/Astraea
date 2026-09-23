@@ -1,0 +1,27 @@
+{
+  "name": "nocturn-aegis-operations",
+  "private": true,
+  "scripts": {
+    "dev": "next dev web -H 127.0.0.1",
+    "build": "next build web",
+    "start": "next start web",
+    "lint": "eslint --config web/eslint.config.mjs web/src",
+    "types": "tsc --noEmit -p web/tsconfig.json",
+    "api:types": "openapi-typescript contracts/openapi.yaml -o web/src/lib/api.generated.ts"
+  },
+  "dependencies": {
+    "next": "^16.1.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "lucide-react": "^0.468.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "eslint": "^9.0.0",
+    "eslint-config-next": "^16.1.0",
+    "openapi-typescript": "^7.0.0",
+    "typescript": "^5.9.0"
+  }
+}

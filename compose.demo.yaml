@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: nocturn_ops
+      POSTGRES_USER: nocturn_demo
+      POSTGRES_PASSWORD: ${DEMO_DB_PASSWORD:?set a local demo database password}
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - demo_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nocturn_demo -d nocturn_ops"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+volumes:
+  demo_pg: {}

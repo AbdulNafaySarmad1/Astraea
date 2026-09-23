@@ -1,0 +1,3 @@
+'use client';
+import { useState } from 'react';
+export function ApproveButton({tenant,id}:{tenant:string;id:string}){const [state,setState]=useState('');async function approve(){setState('Working…');try{const response=await fetch(`/api/proxy/tenants/${tenant}/actions/${id}/approve`,{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});const data=await response.json();if(!response.ok)throw new Error(data.error);setState('Approved');window.location.reload()}catch(e){setState(e instanceof Error?e.message:'Failed')}}return <button className="button button-small" onClick={approve} disabled={!!state}>{state||'Approve'}</button>}

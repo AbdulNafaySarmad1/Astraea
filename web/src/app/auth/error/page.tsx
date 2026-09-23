@@ -1,0 +1,1 @@
+export default function AuthError() { return <main className="auth-error"><h1>Sign in could not be completed</h1><p>The identity provider did not return a valid session. Try again or contact your administrator.</p><a className="button" href="/auth/login">Try again</a></main>; }
