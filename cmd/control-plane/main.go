@@ -24,6 +24,15 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.DB.Close()
+	if c.Mode != "demo" && c.TenantReadDatabaseURL == "" {
+		log.Fatal("TENANT_READ_DATABASE_URL is required for production control-plane reads")
+	}
+	if c.TenantReadDatabaseURL != "" {
+		if err := store.OpenTenantReader(ctx, c.TenantReadDatabaseURL); err != nil {
+			log.Fatal(err)
+		}
+		defer store.Reader.Close()
+	}
 	srv := &http.Server{Addr: c.Listen, Handler: platform.NewServer(store, c).Routes(), ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 20 * time.Second, IdleTimeout: 60 * time.Second}
 	go func() {
 		<-ctx.Done()

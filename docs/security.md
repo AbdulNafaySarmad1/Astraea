@@ -6,7 +6,7 @@ Assets include tenant configuration, infrastructure telemetry, policy, connector
 
 | Threat | Current control | Residual risk / gate |
 | --- | --- | --- |
-| Cross-tenant read or action | Keycloak JWT validation, membership checks, tenant predicates, tenant-bound connector secret | Add PostgreSQL RLS, dedicated DB roles, and integration tests across every route before production |
+| Cross-tenant read or action | Keycloak JWT validation, membership checks, tenant predicates, tenant-bound connector secret, composite tenant foreign keys, optional dedicated RLS tenant reader for detail views | Complete RLS and distinct roles for write, fleet, queue, and connector lookup paths; test every route before production |
 | Domain takeover or SSRF | ASCII hostname normalization, DNS TXT challenge, no server-side URL fetch from entered domains; connector CIDR pinning | Add public-suffix validation, periodic revalidation, and approved endpoint inventory before health-check URLs or custom routing |
 | Prompt injection | Telemetry is structured input; mock gateway only; no model authority or shell | Production provider adapter needs prompt isolation, budget and retention controls, redaction, and adversarial evaluation |
 | Unsafe operation | Disabled policy by default, exact parameter hash, separate approver for high-risk actions, expiry, tenant and global kill switches | Production typed execution adapter, connector attestation, maintenance windows, circuit breaker, and rollback verification are absent |

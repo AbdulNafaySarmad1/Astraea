@@ -3,7 +3,7 @@
 This repository is a working development foundation, not a production deployment. The following items require implementation and verification before connecting a real university:
 
 1. **Execution:** reviewed typed connector tools, exact target attestation, short-lived workload identity or mTLS, precondition and verification protocol, maintenance windows, circuit breakers, rollback, and no broad shell. Current worker simulations must never be interpreted as completed operations.
-2. **Tenant defense:** PostgreSQL RLS and distinct roles, full cross-tenant integration suite, queue and model-context isolation checks, dedicated deployment automation, and external security review.
+2. **Tenant defense:** Composite tenant foreign keys and a scoped, read-only PostgreSQL RLS role now cover tenant detail reads when `TENANT_READ_DATABASE_URL` is configured. Complete separate least-privilege roles and RLS for writes, authorization and connector lookup, fleet listing, queue and model-context isolation checks, dedicated deployment automation, a full cross-tenant suite, and external security review.
 3. **Notifications:** configure and validate a real email delivery gateway, provider webhooks/status, dead-letter alerts, customer notification-policy controls with audited changes, and failure drills.
 4. **Identity:** Keycloak realm and MFA deployment, token refresh and logout propagation, break-glass workflow, user/role administration, and session/access audit completeness.
 5. **AI:** an approved provider adapter with Infisical credentials, allowlists, budgets, rate limits, timeouts, data minimization, retention controls, prompt-injection tests, source review, and incident-memory boundaries. The current gateway is mock only.

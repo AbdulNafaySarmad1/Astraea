@@ -84,6 +84,10 @@ func (s *Server) Routes() http.Handler {
 			fail(w, 503, "database unavailable")
 			return
 		}
+		if s.Config.Mode != "demo" && (s.Store.Reader == nil || s.Store.Reader.Ping(ctx) != nil) {
+			fail(w, 503, "tenant reader unavailable")
+			return
+		}
 		writeJSON(w, 200, map[string]string{"status": "ready"})
 	})
 	mux.HandleFunc("GET /v1/me", s.me)
@@ -141,6 +145,14 @@ func (s *Server) log(r *http.Request, tenant *string, kind, resource, outcome st
 	a := actorFrom(r.Context())
 	_, err := s.Store.Audit(r.Context(), tenant, a.Subject, kind, resource, r.Header.Get("X-Correlation-ID"), outcome, a.IP, detail, notify)
 	return err
+}
+func (s *Server) tenantRead(w http.ResponseWriter, r *http.Request, id string) (pgx.Tx, bool) {
+	tx, err := s.Store.TenantRead(r.Context(), id)
+	if err != nil {
+		fail(w, 503, "tenant read boundary unavailable")
+		return nil, false
+	}
+	return tx, true
 }
 func (s *Server) me(w http.ResponseWriter, r *http.Request) {
 	a := actorFrom(r.Context())
@@ -217,15 +229,20 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	read, ok := s.tenantRead(w, r, id)
+	if !ok {
+		return
+	}
+	defer read.Rollback(r.Context())
 	var name, status, isolation string
 	var mon, ops, kill bool
 	var recipients []string
-	err := s.Store.DB.QueryRow(r.Context(), "SELECT name,status,isolation_mode,monitoring_approved,operations_approved,kill_switch,notification_recipients FROM tenants WHERE id=$1", id).Scan(&name, &status, &isolation, &mon, &ops, &kill, &recipients)
+	err := read.QueryRow(r.Context(), "SELECT name,status,isolation_mode,monitoring_approved,operations_approved,kill_switch,notification_recipients FROM tenants WHERE id=$1", id).Scan(&name, &status, &isolation, &mon, &ops, &kill, &recipients)
 	if err != nil {
 		fail(w, 404, "tenant not found")
 		return
 	}
-	rows, err := s.Store.DB.Query(r.Context(), "SELECT name,kind,status,observed_at FROM components WHERE tenant_id=$1 ORDER BY name", id)
+	rows, err := read.Query(r.Context(), "SELECT name,kind,status,observed_at FROM components WHERE tenant_id=$1 ORDER BY name", id)
 	if err != nil {
 		fail(w, 503, "components unavailable")
 		return
@@ -244,10 +261,18 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		}
 		components = append(components, map[string]any{"name": n, "kind": k, "status": st, "observed_at": at})
 	}
+	rows.Close()
+	if rows.Err() != nil {
+		fail(w, 503, "components unavailable")
+		return
+	}
 	var connectorCount, incidentCount, approvalCount int
-	_ = s.Store.DB.QueryRow(r.Context(), "SELECT count(*) FROM connectors WHERE tenant_id=$1 AND revoked_at IS NULL AND last_seen_at>now()-interval '5 minutes'", id).Scan(&connectorCount)
-	_ = s.Store.DB.QueryRow(r.Context(), "SELECT count(*) FROM incidents WHERE tenant_id=$1 AND status<>'resolved'", id).Scan(&incidentCount)
-	_ = s.Store.DB.QueryRow(r.Context(), "SELECT count(*) FROM action_requests WHERE tenant_id=$1 AND status='pending'", id).Scan(&approvalCount)
+	if read.QueryRow(r.Context(), "SELECT count(*) FROM connectors WHERE tenant_id=$1 AND revoked_at IS NULL AND last_seen_at>now()-interval '5 minutes'", id).Scan(&connectorCount) != nil ||
+		read.QueryRow(r.Context(), "SELECT count(*) FROM incidents WHERE tenant_id=$1 AND status<>'resolved'", id).Scan(&incidentCount) != nil ||
+		read.QueryRow(r.Context(), "SELECT count(*) FROM action_requests WHERE tenant_id=$1 AND status='pending'", id).Scan(&approvalCount) != nil {
+		fail(w, 503, "overview counts unavailable")
+		return
+	}
 	if s.log(r, &id, "customer.overview.viewed", id, "success", map[string]string{"category": "component inventory"}, true) != nil {
 		fail(w, 503, "audit unavailable")
 		return
@@ -259,7 +284,12 @@ func (s *Server) incidents(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := s.Store.DB.Query(r.Context(), "SELECT id,title,severity,status,opened_at,acknowledged_at,resolved_at,summary FROM incidents WHERE tenant_id=$1 ORDER BY opened_at DESC LIMIT 100", id)
+	read, ok := s.tenantRead(w, r, id)
+	if !ok {
+		return
+	}
+	defer read.Rollback(r.Context())
+	rows, err := read.Query(r.Context(), "SELECT id,title,severity,status,opened_at,acknowledged_at,resolved_at,summary FROM incidents WHERE tenant_id=$1 ORDER BY opened_at DESC LIMIT 100", id)
 	if err != nil {
 		fail(w, 503, "incidents unavailable")
 		return
@@ -286,11 +316,16 @@ func (s *Server) auditList(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	read, ok := s.tenantRead(w, r, id)
+	if !ok {
+		return
+	}
+	defer read.Rollback(r.Context())
 	limit := 50
 	if q, e := strconv.Atoi(r.URL.Query().Get("limit")); e == nil && q > 0 && q <= 200 {
 		limit = q
 	}
-	rows, err := s.Store.DB.Query(r.Context(), "SELECT id,actor,event_type,resource,correlation_id,outcome,occurred_at,detail FROM audit_events WHERE tenant_id=$1 ORDER BY occurred_at DESC LIMIT $2", id, limit)
+	rows, err := read.Query(r.Context(), "SELECT id,actor,event_type,resource,correlation_id,outcome,occurred_at,detail FROM audit_events WHERE tenant_id=$1 ORDER BY occurred_at DESC LIMIT $2", id, limit)
 	if err != nil {
 		fail(w, 503, "audit unavailable")
 		return
@@ -313,7 +348,12 @@ func (s *Server) notifications(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := s.Store.DB.Query(r.Context(), "SELECT o.id,o.recipient,o.status,o.attempts,o.delivered_at,e.event_type,e.occurred_at FROM notification_outbox o JOIN audit_events e ON e.id=o.audit_event_id WHERE o.tenant_id=$1 ORDER BY e.occurred_at DESC LIMIT 100", id)
+	read, ok := s.tenantRead(w, r, id)
+	if !ok {
+		return
+	}
+	defer read.Rollback(r.Context())
+	rows, err := read.Query(r.Context(), "SELECT o.id,o.recipient,o.status,o.attempts,o.delivered_at,e.event_type,e.occurred_at FROM notification_outbox o JOIN audit_events e ON e.id=o.audit_event_id WHERE o.tenant_id=$1 ORDER BY e.occurred_at DESC LIMIT 100", id)
 	if err != nil {
 		fail(w, 503, "notifications unavailable")
 		return
@@ -558,6 +598,11 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	read, ok := s.tenantRead(w, r, id)
+	if !ok {
+		return
+	}
+	defer read.Rollback(r.Context())
 	window := r.URL.Query().Get("window")
 	if window != "1h" && window != "24h" && window != "7d" {
 		window = "24h"
@@ -569,7 +614,7 @@ func (s *Server) metrics(w http.ResponseWriter, r *http.Request) {
 	if window == "7d" {
 		hours = 168
 	}
-	rows, err := s.Store.DB.Query(r.Context(), "SELECT observed_at,avg(value) FROM telemetry WHERE tenant_id=$1 AND metric='probe_latency_ms' AND observed_at>=now()-($2::int * interval '1 hour') GROUP BY observed_at ORDER BY observed_at LIMIT 500", id, hours)
+	rows, err := read.Query(r.Context(), "SELECT observed_at,avg(value) FROM telemetry WHERE tenant_id=$1 AND metric='probe_latency_ms' AND observed_at>=now()-($2::int * interval '1 hour') GROUP BY observed_at ORDER BY observed_at LIMIT 500", id, hours)
 	if err != nil {
 		fail(w, 503, "telemetry unavailable")
 		return

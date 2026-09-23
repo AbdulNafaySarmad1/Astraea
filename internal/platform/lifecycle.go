@@ -11,7 +11,12 @@ func (s *Server) domains(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := s.Store.DB.Query(r.Context(), "SELECT id,hostname,surface,status,certificate_status,verified_at,expires_at FROM domains WHERE tenant_id=$1 ORDER BY created_at DESC", id)
+	read, ok := s.tenantRead(w, r, id)
+	if !ok {
+		return
+	}
+	defer read.Rollback(r.Context())
+	rows, err := read.Query(r.Context(), "SELECT id,hostname,surface,status,certificate_status,verified_at,expires_at FROM domains WHERE tenant_id=$1 ORDER BY created_at DESC", id)
 	if err != nil {
 		fail(w, 503, "domains unavailable")
 		return
@@ -34,7 +39,12 @@ func (s *Server) connectors(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := s.Store.DB.Query(r.Context(), "SELECT id,name,version,capabilities,revoked_at,last_seen_at,last_telemetry_at,created_at FROM connectors WHERE tenant_id=$1 ORDER BY created_at DESC", id)
+	read, ok := s.tenantRead(w, r, id)
+	if !ok {
+		return
+	}
+	defer read.Rollback(r.Context())
+	rows, err := read.Query(r.Context(), "SELECT id,name,version,capabilities,revoked_at,last_seen_at,last_telemetry_at,created_at FROM connectors WHERE tenant_id=$1 ORDER BY created_at DESC", id)
 	if err != nil {
 		fail(w, 503, "connectors unavailable")
 		return
@@ -142,7 +152,12 @@ func (s *Server) policies(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := s.Store.DB.Query(r.Context(), "SELECT action_type,version,enabled,risk,approval_required,max_per_hour,updated_at FROM policies WHERE tenant_id=$1 ORDER BY action_type", id)
+	read, ok := s.tenantRead(w, r, id)
+	if !ok {
+		return
+	}
+	defer read.Rollback(r.Context())
+	rows, err := read.Query(r.Context(), "SELECT action_type,version,enabled,risk,approval_required,max_per_hour,updated_at FROM policies WHERE tenant_id=$1 ORDER BY action_type", id)
 	if err != nil {
 		fail(w, 503, "policies unavailable")
 		return

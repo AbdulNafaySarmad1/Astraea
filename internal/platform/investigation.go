@@ -83,7 +83,12 @@ func (s *Server) investigations(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := s.Store.DB.Query(r.Context(), "SELECT id,requested_by,status,summary,uncertainty,evidence,sources,provider,created_at,completed_at FROM investigations WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50", id)
+	read, ok := s.tenantRead(w, r, id)
+	if !ok {
+		return
+	}
+	defer read.Rollback(r.Context())
+	rows, err := read.Query(r.Context(), "SELECT id,requested_by,status,summary,uncertainty,evidence,sources,provider,created_at,completed_at FROM investigations WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 50", id)
 	if err != nil {
 		fail(w, 503, "investigations unavailable")
 		return

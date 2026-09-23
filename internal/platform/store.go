@@ -17,7 +17,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type Store struct{ DB *pgxpool.Pool }
+type Store struct {
+	DB     *pgxpool.Pool
+	Reader *pgxpool.Pool
+}
 
 func Open(ctx context.Context, url string) (*Store, error) {
 	p, err := pgxpool.New(ctx, url)
@@ -29,6 +32,76 @@ func Open(ctx context.Context, url string) (*Store, error) {
 		return nil, err
 	}
 	return &Store{DB: p}, nil
+}
+
+// OpenTenantReader requires a distinct non-owner login that has been granted
+// nocturn_tenant_reader. A table owner or BYPASSRLS role would defeat the
+// policy and is rejected before the API starts serving requests.
+func (s *Store) OpenTenantReader(ctx context.Context, url string) error {
+	p, err := pgxpool.New(ctx, url)
+	if err != nil {
+		return err
+	}
+	var member, privileged, owner, policiesReady bool
+	err = p.QueryRow(ctx, `SELECT pg_has_role(session_user,'nocturn_tenant_reader','MEMBER'),
+      session_role.rolsuper OR session_role.rolbypassrls OR active_role.rolsuper OR active_role.rolbypassrls,
+      (SELECT coalesce(bool_or(session_user = pg_get_userbyid(owned.relowner)
+        OR current_user = pg_get_userbyid(owned.relowner)),true)
+       FROM pg_class owned JOIN pg_policies owner_policies
+         ON owner_policies.tablename=owned.relname AND owner_policies.schemaname='public'
+       WHERE owner_policies.policyname='tenant_reader_scope'
+         AND owned.relnamespace='public'::regnamespace),
+      (SELECT count(*)=15 AND count(DISTINCT tables.oid)=15
+         AND bool_and(policies.policyname='tenant_reader_scope')
+       FROM pg_class tables
+       JOIN pg_policies policies ON policies.tablename=tables.relname
+         AND policies.schemaname='public'
+       WHERE tables.oid IN ('public.tenants'::regclass,'public.memberships'::regclass,
+         'public.domains'::regclass,'public.connectors'::regclass,
+         'public.enrollment_tokens'::regclass,'public.components'::regclass,
+         'public.telemetry'::regclass,'public.incidents'::regclass,
+         'public.policies'::regclass,'public.action_requests'::regclass,
+         'public.jobs'::regclass,'public.audit_events'::regclass,
+         'public.notification_outbox'::regclass,'public.knowledge_documents'::regclass,
+         'public.investigations'::regclass) AND tables.relrowsecurity)
+      FROM pg_roles session_role, pg_roles active_role
+      WHERE session_role.rolname=session_user AND active_role.rolname=current_user
+      `).Scan(&member, &privileged, &owner, &policiesReady)
+	if err != nil || !member || privileged || owner || !policiesReady {
+		p.Close()
+		if err != nil {
+			return fmt.Errorf("tenant reader validation: %w", err)
+		}
+		return errors.New("tenant reader requires a non-owner, non-bypass login and all tenant read policies")
+	}
+	s.Reader = p
+	return nil
+}
+
+// TenantRead scopes every read to a transaction-local tenant ID. The
+// dedicated reader pool is required in production; demo mode may use DB.
+func (s *Store) TenantRead(ctx context.Context, tenantID string) (pgx.Tx, error) {
+	if tenantID == "" {
+		return nil, errors.New("tenant ID required")
+	}
+	if s.Reader == nil {
+		return s.DB.Begin(ctx)
+	}
+	tx, err := s.Reader.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err = tx.Exec(ctx, "SET LOCAL search_path=public,pg_catalog"); err == nil {
+		_, err = tx.Exec(ctx, "SET LOCAL ROLE nocturn_tenant_reader")
+	}
+	if err == nil {
+		_, err = tx.Exec(ctx, "SELECT set_config('app.tenant_id',$1,true)", tenantID)
+	}
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		return nil, err
+	}
+	return tx, nil
 }
 func randomToken() (string, error) {
 	b := make([]byte, 32)

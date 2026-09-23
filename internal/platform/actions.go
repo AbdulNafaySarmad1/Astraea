@@ -166,7 +166,12 @@ func (s *Server) actions(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	rows, err := s.Store.DB.Query(r.Context(), "SELECT id,target,action_type,purpose,impact,status,requested_by,approved_by,created_at,approval_expires_at FROM action_requests WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 100", id)
+	read, ok := s.tenantRead(w, r, id)
+	if !ok {
+		return
+	}
+	defer read.Rollback(r.Context())
+	rows, err := read.Query(r.Context(), "SELECT id,target,action_type,purpose,impact,status,requested_by,approved_by,created_at,approval_expires_at FROM action_requests WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 100", id)
 	if err != nil {
 		fail(w, 503, "actions unavailable")
 		return

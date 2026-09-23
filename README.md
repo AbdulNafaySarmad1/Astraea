@@ -35,6 +35,7 @@ The API derives tenant access from a verified Keycloak identity and server-side 
 | `internal/platform/` | Domain logic, OIDC verifier, policy checks, mock gateway |
 | `contracts/openapi.yaml` | Versioned HTTP contract; generates `web/src/lib/api.generated.ts` |
 | `db/` | PostgreSQL migrations and fictional demo seed |
+| `deploy/postgres_tenant_reader.sql` | Restricted tenant-read role and row policies for production configuration |
 | `docs/` | Architecture, threat model, runbooks, and production gates |
 
 ## Local demo
