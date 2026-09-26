@@ -1,167 +1,159 @@
-# Nocturne AegisOps
+# Astraea
 
-Nocturne AegisOps is a multi-tenant operations console and Go control plane for monitoring AegisCore deployments and reviewing proposed infrastructure actions.
+**Infrastructure control, without infrastructure fragmentation.**
 
-**Status: development foundation.** The repository runs a fictional, local demo. The AI gateway and operation results are mocked, and several deployment and security controls still need implementation and validation. Do not connect a real customer environment or treat simulated operations as production changes. See the [production readiness gates](docs/production-readiness.md).
+Astraea is a secure, multi-tenant infrastructure control plane for managing distributed application environments across cloud, private infrastructure, and on-premises systems.
 
-## What is implemented
+It provides engineering and operations teams with a unified operational layer for infrastructure visibility, deployment coordination, telemetry, policy enforcement, controlled administrative actions, incident investigation, auditability, and lifecycle management.
 
-- A Next.js and TypeScript console with fleet, customer, incident, investigation, approval, audit, and settings views. The demo marks fictional data and distinguishes stale telemetry and disconnected connectors.
-- A Go HTTP control plane with tenant records, domain DNS TXT challenges, connector enrollment and revocation, telemetry, incidents, policies, approval records, audit search, and notification status. Its [versioned OpenAPI contract](contracts/openapi.yaml) generates the [frontend API types](web/src/lib/api.generated.ts).
-- Keycloak OIDC authorization code with PKCE in the console and token verification, role checks, and tenant membership checks in the API. The local demo uses a loopback-only demo identity instead of Keycloak.
-- PostgreSQL migrations, fictional seed data, a durable `jobs` table, and a notification outbox. A separate Go worker leases jobs, retries failures, and runs mock investigations and simulated operations.
-- A separately deployable, tenant-bound Go connector that sends outbound HTTPS heartbeats and locally approved TCP, host, PostgreSQL, and Valkey health signals. It queues bounded metric batches on disk during outages and does not accept remote commands or probe targets from the control plane. See [connector telemetry](docs/connector-telemetry.md).
-- Opt-in infrastructure service log tailing from approved local files, with encrypted hot batches, tenant-scoped metadata, auditable legal holds, and a separate archive worker that creates verified gzip archives after 365 days. See [service log lifecycle](docs/service-logs.md).
-- A hash-chained PostgreSQL audit trail and a verifier. The email outbox supports disabled, mock, and HTTPS gateway modes; mock delivery is labeled `simulated`.
-- Optional InfluxDB 3 writes for numeric telemetry. Current console graphs read samples from PostgreSQL.
-- A deterministic worker that opens deduplicated degraded, unknown, and stale health incidents from approved component signals. The console can select latency, host, PostgreSQL, and Valkey metrics where samples are available.
-- Server-side Cloudflare Turnstile validation on the public contact API when configured. The console has no Turnstile widget or public contact form. Edge status is informational and defaults to `unconfigured`.
+Rather than replacing the infrastructure platforms an organization already uses, Astraea operates above them—providing a consistent control plane across heterogeneous environments.
 
-## Still needed for production
+## One Control Plane. Every Environment.
 
-Reviewed connector operation tools and real execution, AegisCore and R2 collectors, rotation-aware log tailing, archive key rotation and mounted Storage Box validation, an approved AI provider adapter, a deployed Keycloak realm with MFA, scoped secrets delivery, a production email gateway and delivery reconciliation, broader database role isolation, external audit anchoring, backup and restore drills, alert routing, and end-to-end security testing remain open. Cloudflare/Akamai API integration, custom hostname provisioning and routing, certificate lifecycle management, and end-to-end post-quantum cryptography validation are not implemented. The connector requires hybrid ML-KEM key exchange for its control-plane HTTPS connection only. See the [full gate list](docs/production-readiness.md).
+Modern infrastructure rarely exists in one place.
 
-## Architecture
+Applications may run across public cloud providers, private data centers, customer-controlled servers, container platforms, databases, edge networks, and geographically distributed environments. Each introduces its own operational model, credentials, monitoring systems, policies, and failure modes.
 
-```mermaid
-flowchart LR
-  U[Operator or customer viewer] --> W[Next.js console]
-  W -->|OIDC token or local demo identity| A[Go control plane]
-  K[Keycloak, when configured] -->|OIDC login and token endpoint| W
-  K -->|Issuer and JWKS| A
-  A --> P[(PostgreSQL: tenants, telemetry, jobs, audit, outbox)]
-  C[Customer-bound Go connector] -->|outbound HTTPS telemetry and approved logs| A
-  J[Go worker] <--> P
-  A --> H[(Encrypted hot log files)]
-  L[Go log archive worker] <--> P
-  L --> H
-  L --> R[(Configured archive filesystem)]
-  J --> M[Mock model gateway]
-  J --> E[Mock or HTTPS email gateway]
-  J -. optional writes .-> I[InfluxDB 3]
-```
+Astraea provides a common control plane across those environments.
 
-The API authorizes tenant access using the authenticated actor and server-side membership. A connector credential binds to one tenant. DNS control is an onboarding check, not permission to access infrastructure. Policy and approval records gate dispatch; the worker only simulates operations today. Production customer detail reads can use a separate PostgreSQL row-level-security reader role, but other database paths still need role separation. See [architecture](docs/architecture.md) and [security](docs/security.md).
+Through tenant-bound connectors and provider integrations, Astraea establishes controlled visibility into infrastructure while maintaining strict separation between organizations and environments.
 
-| Component | Repository location | Current role |
-| --- | --- | --- |
-| Next.js 16, React 19, TypeScript | [`web/`](web/) | Server-rendered console and API proxy |
-| Go 1.27 | [`cmd/`](cmd/), [`internal/platform/`](internal/platform/) | Control plane, worker, connector, migrations, audit verifier |
-| PostgreSQL 17 | [`db/`](db/), [`compose.demo.yaml`](compose.demo.yaml) | Application records, recent telemetry, durable jobs and outbox |
-| InfluxDB 3 | [`internal/platform/`](internal/platform/) | Optional asynchronous metric writes; not in the demo Compose file |
-| Keycloak | [`deploy/keycloak/`](deploy/keycloak/) | External OIDC identity provider; theme assets included, server not bundled |
-| Infisical | [deployment guidance](docs/deployment.md) | Recommended production secret delivery; no runtime integration in this repo |
+Operators gain a unified view of:
 
-The durable queue is PostgreSQL-backed; Redis or Valkey is not required by this implementation.
+- infrastructure and application health
+- deployments and managed environments
+- service telemetry
+- incidents and investigations
+- infrastructure operations
+- policy decisions
+- administrative approvals
+- service and infrastructure logs
+- audit history
+- connector and integration state
 
-## Screenshots
+Astraea is designed to support environments where infrastructure cannot simply be transferred into a vendor-controlled cloud.
 
-No product screenshots are checked in. Run the local demo to inspect the console. The [product mark](web/public/brand/nocturn-mark.png) is an asset, not a screenshot.
+## Controlled Infrastructure Operations
 
-## Prerequisites
+Infrastructure operations can carry significant operational and security consequences.
 
-- Go 1.27, as specified in [`go.mod`](go.mod).
-- Node.js 24 and npm, matching [CI](.github/workflows/ci.yaml).
-- Docker with the Compose plugin for the local PostgreSQL container.
-- A PowerShell terminal for the commands below. CI also builds on Ubuntu; no broader development OS support matrix has been validated.
+Astraea therefore treats privileged infrastructure actions as controlled transactions rather than ordinary API requests.
 
-The demo Compose file starts **only PostgreSQL**, bound to `127.0.0.1:55433`. It does not start Keycloak, InfluxDB, an email provider, or a customer connector.
+Operations can be evaluated against policy, scoped to explicit parameters, subjected to authorization and approval requirements, recorded in the audit system, and dispatched only after the required controls have been satisfied.
 
-## Quick start: fictional local demo
+High-impact operations can require explicit human authorization before execution.
 
-Run these commands from the repository root. Create an ignored `.env.demo.local` file with the following values, replacing `<random-local-password>` with a local alphanumeric password. Use the same password in both entries; URL-encode it if it contains URL-reserved characters.
+This model allows organizations to introduce automation without surrendering operational control.
 
-```dotenv
-APP_MODE=demo
-DEMO_DB_PASSWORD=<random-local-password>
-DATABASE_URL=postgres://nocturn_demo:<random-local-password>@127.0.0.1:55433/nocturn_ops?sslmode=disable
-LISTEN_ADDR=127.0.0.1:8090
-API_URL=http://127.0.0.1:8090
-PUBLIC_URL=http://127.0.0.1:3000
-EMAIL_MODE=mock
-```
+## Secure by Architecture
 
-Create this file from the block above rather than copying [`.env.example`](.env.example): that example targets production and includes a placeholder `TENANT_READ_DATABASE_URL`. Leave `TENANT_READ_DATABASE_URL` unset for the demo.
+Astraea is designed around explicit trust boundaries and least-privilege access.
 
-Start PostgreSQL, then load the environment into the terminal that will run migrations:
+The platform architecture supports:
 
-```powershell
-docker compose --env-file .env.demo.local -f compose.demo.yaml up -d --wait
-Get-Content .env.demo.local | ForEach-Object { if ($_ -match '^([A-Z_]+)=(.*)$') { Set-Item -Path "Env:$($matches[1])" -Value $matches[2] } }
-go run ./cmd/migrate
-Get-Content db/demo_seed.sql -Raw | docker compose --env-file .env.demo.local -f compose.demo.yaml exec -T postgres psql -X -U nocturn_demo -d nocturn_ops -v ON_ERROR_STOP=1
-```
+**Tenant isolation**  
+Every managed environment is associated with an explicit tenant identity and authorization boundary.
 
-Open three terminals at the repository root. Load `.env.demo.local` into **each** terminal using the `Get-Content ... | ForEach-Object ...` command above, then run one service per terminal:
+**Workload and operator identity**  
+Human access is authenticated through standards-based identity infrastructure, while machine integrations use independently scoped credentials.
 
-```powershell
-go run ./cmd/control-plane
-```
+**Outbound connectivity**  
+Customer-side connectors are designed to establish outbound connections to the Astraea control plane, reducing the need to expose management interfaces directly to the Internet.
 
-```powershell
-go run ./cmd/worker
-```
+**Policy-controlled operations**  
+Infrastructure actions can be constrained by policy, authorization, environment, capability, and exact operation parameters.
 
-```powershell
-npm ci
-npm run dev
-```
+**Approval boundaries**  
+Sensitive or destructive operations can require explicit authorization before dispatch.
 
-Visit <http://127.0.0.1:3000/fleet>. The API readiness endpoint is <http://127.0.0.1:8090/health/ready>. The console and API listen on loopback in demo mode; the seeded universities, connectors, incidents, and telemetry are fictional. The worker does not send real email or execute infrastructure changes.
+**Auditable operations**  
+Security-sensitive activity is recorded through tamper-evident audit mechanisms designed to support investigation and accountability.
 
-To discard the **entire local demo database**, stop the services and run `docker compose --env-file .env.demo.local -f compose.demo.yaml down --volumes`, then repeat the database startup, migration, and seed commands. The seed is intended for a fresh demo database.
+**Scoped secrets**  
+Infrastructure credentials are intended to remain outside browsers, source code, telemetry, and AI context, with production deployments integrating dedicated secret-management infrastructure.
 
-## Configuration and service setup
+## Distributed Control Plane Architecture
 
-The checked-in [`.env.example`](.env.example) is a production-oriented variable reference, not a ready-to-run deployment file. Keep local secret values in ignored files; inject production credentials through scoped workload identities or a secret manager. Variables are read by the Go processes and/or Next.js server at startup.
+Astraea separates centralized orchestration from customer-controlled infrastructure.
 
-| Variable | Used for |
-| --- | --- |
-| `APP_MODE` | `demo` enables loopback-only demo access; default is `production` |
-| `DATABASE_URL` | PostgreSQL connection for API, worker, migrations, and audit verifier |
-| `TENANT_READ_DATABASE_URL` | Separate restricted reader required by the production control plane |
-| `LISTEN_ADDR`, `API_URL`, `PUBLIC_URL` | Go listener, console-to-API URL, and canonical console URL |
-| `OIDC_ISSUER`, `OIDC_AUDIENCE`, `OIDC_CLIENT_ID` | Keycloak issuer/API audience and console client; needed outside demo mode |
-| `EMAIL_MODE`, `EMAIL_PROVIDER_URL`, `EMAIL_PROVIDER_TOKEN` | `disabled`, `mock`, or HTTPS delivery gateway; gateway URL/token needed for `http` |
-| `INFLUX_URL`, `INFLUX_DATABASE`, `INFLUX_TOKEN` | Optional InfluxDB 3 write destination |
-| `TURNSTILE_SECRET`, `TURNSTILE_HOSTNAME`, `TURNSTILE_ACTION` | Optional server-side verification for `/v1/public/contact` |
-| `TRUSTED_PROXY_CIDRS` | Explicitly trusted proxy networks for forwarded request provenance |
-| `LOG_HOT_DIR`, `LOG_KEY_B64` | Optional encrypted service-log hot storage and base64 32-byte key; required to accept logs |
-| `LOG_ARCHIVE_DIR` | Worker archive mount; required when the worker archives service logs |
-| `LOG_HOT_MARKER`, `LOG_ARCHIVE_MARKER` | Expected store identities; matching `.aegisops-store-id` files must exist on provisioned volumes |
-| `DEMO_DB_PASSWORD` | Compose-only password for local PostgreSQL |
-| `CONNECTOR_CREDENTIAL` | Customer connector bearer credential, supplied only to that connector |
+The central control plane maintains operational state, policy, telemetry, incidents, approvals, audit records, and asynchronous work.
 
-Migrations live in [`db/`](db/) and are applied once by `go run ./cmd/migrate`. [`db/demo_seed.sql`](db/demo_seed.sql) contains reserved `.example` and `.invalid` names. For production, a database administrator must additionally apply [`deploy/postgres_tenant_reader.sql`](deploy/postgres_tenant_reader.sql), create a non-owner reader login, and set `TENANT_READ_DATABASE_URL`; see [deployment guidance](docs/deployment.md). No production database provisioning or reset command is supplied.
+Tenant-bound connectors operate within managed environments and communicate with the control plane through authenticated outbound channels.
 
-For Keycloak, configure the realm, clients, redirect URI, roles, and MFA as described in [deployment guidance](docs/deployment.md). The console implements authorization code with PKCE and the API checks issuer, audience, roles, and tenant membership. Keycloak is not part of the demo Compose stack. The optional [login theme](deploy/keycloak/README.md) must be installed and selected separately.
+This architecture allows Astraea to manage infrastructure across:
 
-Connector enrollment is described in [deployment guidance](docs/deployment.md). It requires a customer authorization record, DNS TXT verification, a one-time enrollment token with server-approved capabilities, and monitoring approval. The [`cmd/connector/`](cmd/connector/) binary reads a local JSON config supplied with `-config` and `CONNECTOR_CREDENTIAL`; it requires an HTTPS control-plane URL and only probes configured hosts, ports, and allowed CIDRs. [Connector telemetry setup](docs/connector-telemetry.md) describes the service-specific monitoring credentials and persistent spool; [service log setup](docs/service-logs.md) covers separate log approval and retention. The HTTP loopback demo API is **not** a connector endpoint. Demo connector rows are seeded fixtures, not running agents.
+- cloud environments
+- private data centers
+- customer premises
+- isolated application environments
+- hybrid infrastructure
+- geographically distributed deployments
 
-## Checks and builds
+without requiring the underlying infrastructure to be consolidated onto a single hosting provider.
 
-These commands are defined by the project scripts or used in [CI](.github/workflows/ci.yaml):
+## Observability and Incident Operations
 
-```powershell
-go test ./cmd/... ./internal/...
-go build ./cmd/... ./internal/...
-npm ci
-npm run api:types
-npm run lint
-npm run types
-npm run build
-```
+Astraea continuously receives approved infrastructure and service telemetry from managed environments.
 
-`npm run api:types` regenerates `web/src/lib/api.generated.ts` from `contracts/openapi.yaml`; CI checks that the generated file has no diff. With `DATABASE_URL` set, `go run ./cmd/audit-verify` checks the stored audit hash chain. There is no repository-wide formatting script; format Go changes with `gofmt` and check frontend style with `npm run lint`.
+Health signals can be evaluated to identify degraded, unavailable, unknown, or stale components and generate operational incidents.
 
-## Deployment and security boundaries
+Operators can investigate infrastructure behavior using available host, network, database, latency, service, and application telemetry while retaining tenant and environment boundaries.
 
-[`deploy/Dockerfile.backend`](deploy/Dockerfile.backend) builds the Go binaries independently; [`deploy/Dockerfile.web`](deploy/Dockerfile.web) builds the console. The repository does not include a production Compose stack, Kubernetes manifests, or infrastructure provisioning. Use the [deployment notes](docs/deployment.md), [operations runbooks](docs/operations.md), [threat model](docs/security.md), and [production gates](docs/production-readiness.md) to plan a deployment.
+Astraea also supports controlled service-log ingestion with encrypted storage, retention management, archival workflows, and legal-hold capabilities.
 
-Tenant authorization is checked in the API, while a separate PostgreSQL reader role and row policies can protect selected customer detail reads in production. Policies, exact-parameter approvals, and kill switches exist, but there is no production operation executor. The audit trail is hash-chained in PostgreSQL; external anchoring, archive expiry, key rotation, and operational restore drills remain open. Never put provider credentials or customer data in the browser, source, model prompts, or demo seed. The model gateway currently uses a mock provider. Turnstile validation protects only the configured public contact API; Cloudflare/Akamai edge controls and custom domain activation require external work and are not asserted as active by this repository.
+## Durable Operations
 
-The [Graphify knowledge graph](docs/knowledge-graph/README.md) is a generated code-navigation aid. Its extraction does not replace the source, schema, or security documentation.
+Infrastructure management must remain reliable when individual services, networks, or integrations fail.
 
-## Project information
+Astraea therefore uses durable asynchronous execution for operational work.
 
-No license file, formal contribution guide, or support contact is included in this repository. Confirm those terms with the project owner before external use or contribution.
+Jobs can survive process restarts, failed execution can be retried under controlled policies, connectors can temporarily buffer bounded telemetry during connectivity interruptions, and notification delivery can be reconciled independently from the operation that generated it.
+
+The control plane is designed around eventual recovery rather than assuming permanent connectivity.
+
+## Identity and Authorization
+
+Astraea integrates with external identity infrastructure using OpenID Connect.
+
+Authentication, tenant membership, platform roles, operation authorization, and infrastructure permissions are evaluated independently.
+
+This separation allows organizations to distinguish between:
+
+- platform access
+- tenant access
+- infrastructure visibility
+- operational privileges
+- approval authority
+- administrative capabilities
+
+Access to the Astraea console does not inherently grant authority over managed infrastructure.
+
+## Extensible by Design
+
+Astraea is intended to operate as a platform rather than a fixed deployment appliance.
+
+Infrastructure providers, databases, monitoring systems, storage platforms, identity providers, edge networks, and application platforms can be integrated through defined interfaces while the Astraea control plane maintains consistent policy, authorization, auditing, and operational semantics.
+
+This enables organizations to extend Astraea without redesigning the core control plane for every infrastructure environment.
+
+## Built for Enterprise Operations
+
+Astraea is designed for organizations operating infrastructure where security, accountability, availability, and operational control are first-class requirements.
+
+It can serve as the operational foundation for SaaS platforms, enterprise applications, managed services, distributed infrastructure, private deployments, and customer-hosted systems.
+
+Nocturne Systems uses Astraea as the infrastructure control layer for platforms including AegisCore and MARID, allowing the same architecture used to operate Nocturne-managed systems to be deployed independently for customer infrastructure.
+
+## Development Status
+
+Astraea is currently under active development and has **not yet reached production release status**.
+
+The existing implementation establishes the control-plane foundation, including the management console, Go control plane, tenant-bound connector architecture, PostgreSQL persistence, durable asynchronous jobs, identity integration, telemetry ingestion, incident generation, approval records, audit mechanisms, and controlled log lifecycle.
+
+Production operation execution, additional infrastructure integrations, hardened secrets delivery, external audit anchoring, disaster-recovery validation, production identity deployment, expanded database isolation, alert routing, edge-provider automation, certificate lifecycle management, and end-to-end security validation remain subject to implementation and production-readiness review.
+
+Until those gates have been completed and independently validated, Astraea development environments must not be treated as authorization to manage production customer infrastructure.
+
+---
+
+**Astraea provides one secure operational control plane for infrastructure—regardless of where that infrastructure runs.**
