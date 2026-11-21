@@ -154,6 +154,14 @@ Production operation execution, additional infrastructure integrations, hardened
 
 Until those gates have been completed and independently validated, Astraea development environments must not be treated as authorization to manage production customer infrastructure.
 
+## Contributing
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md); it explains the setup, the checks to run, and the security rules for tenant isolation and privileged operations. Contributors sign a short [CLA](CLA.md) and follow the [Code of Conduct](CODE_OF_CONDUCT.md). Please report security issues privately, as described in [SECURITY.md](SECURITY.md).
+
+## License
+
+Astraea is licensed under the [GNU Affero General Public License v3.0](LICENSE) (`AGPL-3.0-only`). If you run a modified version as a network service, the AGPL requires you to offer its source to the users of that service.
+
 ---
 
 **Astraea provides one secure operational control plane for infrastructure—regardless of where that infrastructure runs.**
